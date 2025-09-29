@@ -922,10 +922,12 @@ class Model3DManager {
 
                 // Pan (mover)
                 const c = centerPt(t1, t2);
-                const dx = (c.x - this._touch.lastCenter.x) * 0.01;
-                const dy = (c.y - this._touch.lastCenter.y) * 0.01;
-                this.model.position.x += dx;
-                this.model.position.y -= dy;
+                if (!this.isARMode && !this._tapPlacementEnabled) {
+                    const dx = (c.x - this._touch.lastCenter.x) * 0.01;
+                    const dy = (c.y - this._touch.lastCenter.y) * 0.01;
+                    this.model.position.x += dx;
+                    this.model.position.y -= dy;
+                }
                 this._touch.lastCenter = c;
             } else if (e.touches.length === 1 && this._controls.isDragging) {
                 // Rotar con un dedo
