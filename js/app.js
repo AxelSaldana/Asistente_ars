@@ -6,10 +6,10 @@
 const CONFIG = {
     MODEL: {
         PATH: 'models/avatar_prueba.glb', // ← RUTA DIRECTA
-        SCALE: 2,
+        SCALE: 1,
         AUTO_ROTATE: false,
         ROTATE_SPEED: 0.005,
-        ANIMATION_SPEED: 2, // velocidad 20% más rápida
+        ANIMATION_SPEED: 3, // velocidad 20% más rápida
         ANIMATIONS: {
             IDLE: 'Animation',
             TALKING: 'animation',
@@ -191,6 +191,95 @@ class SpeechManager {
             this.unsupportedReason = 'No se pudo inicializar la voz: ' + (error?.message || 'desconocido');
             return false;
         }
+    }
+
+    setupSpeechRecognition() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        this.recognition = new SpeechRecognition();
+
+        this.recognition.continuous = false;
+        this.recognition.interimResults = false;
+        this.recognition.lang = CONFIG.SPEECH.LANGUAGE;
+        this.recognition.maxAlternatives = 1;
+
+        this.recognition.onstart = () => { this.isListening = true; };
+        this.recognition.onend = () => { this.isListening = false; };
+        this.recognition.onerror = (e) => {
+            this.isListening = false;
+            this.lastError = e && e.error ? e.error : 'unknown_error';
+            console.warn('🎤 SpeechRecognition error:', this.lastError);
+        };
+    }
+
+    async listen() {
+        if (this.isListening) return null;
+
+        return new Promise((resolve) => {
+            // detener cualquier síntesis en curso
+            this.stopSpeaking();
+
+            // Crear una nueva instancia para cada intento (algunos navegadores fallan en reusar)
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) return resolve(null);
+            const rec = new SpeechRecognition();
+            this.recognition = rec;
+
+            rec.continuous = false;
+            rec.interimResults = false;
+            rec.lang = CONFIG.SPEECH.LANGUAGE;
+            rec.maxAlternatives = 1;
+
+            this.isListening = true;
+
+            let settled = false;
+            const finish = (val) => {
+                if (settled) return;
+                settled = true;
+                try { rec.stop(); } catch (_) {}
+                this.isListening = false;
+                resolve(val);
+            };
+
+            const timeoutMs = Math.max(5000, (CONFIG.SPEECH.RECOGNITION_TIMEOUT || 8000), 12000);
+            const timer = setTimeout(() => finish(null), timeoutMs);
+
+            // Diagnóstico útil
+            rec.onaudiostart = () => console.log('🎤 onaudiostart');
+            rec.onsoundstart = () => console.log('🎤 onsoundstart');
+            rec.onspeechstart = () => console.log('🎤 onspeechstart');
+            rec.onsoundend = () => console.log('🎤 onsoundend');
+            rec.onnomatch = () => console.warn('🎤 onnomatch');
+
+            rec.onresult = (event) => {
+                clearTimeout(timer);
+                let text = null;
+                try {
+                    if (event.results && event.results.length > 0) {
+                        text = (event.results[0][0]?.transcript || '').trim();
+                    }
+                } catch (_) {}
+                finish(text && text.length > 0 ? text : null);
+            };
+
+            rec.onerror = (e) => {
+                clearTimeout(timer);
+                console.warn('🎤 recognition.onerror:', e?.error || e);
+                finish(null);
+            };
+
+            rec.onend = () => {
+                clearTimeout(timer);
+                finish(null);
+            };
+
+            try {
+                rec.start();
+            } catch (err) {
+                console.warn('🎤 start error:', err?.message || err);
+                clearTimeout(timer);
+                finish(null);
+            }
+        });
     }
 
     async speak(text) {
