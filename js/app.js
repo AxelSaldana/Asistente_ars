@@ -925,8 +925,14 @@ class Model3DManager {
                 if (!this.isARMode && !this._tapPlacementEnabled) {
                     const dx = (c.x - this._touch.lastCenter.x) * 0.01;
                     const dy = (c.y - this._touch.lastCenter.y) * 0.01;
-                    this.model.position.x += dx;
-                    this.model.position.y -= dy;
+                    // Umbral para evitar jitter por micro-movimientos
+                    if (Math.abs(dx) + Math.abs(dy) > 0.06) {
+                        this.model.position.x += dx;
+                        this.model.position.y -= dy;
+                    }
+                } else {
+                    // En AR mantener al avatar pegado al piso tras escalar
+                    this.model.position.y = 0;
                 }
                 this._touch.lastCenter = c;
             } else if (e.touches.length === 1 && this._controls.isDragging) {
