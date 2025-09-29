@@ -721,6 +721,8 @@ class Model3DManager {
         if (this.canvas) {
             this.canvas.style.display = visible ? 'block' : 'none';
             this.canvas.style.visibility = visible ? 'visible' : 'hidden';
+            // Asegurar interacción táctil en móvil
+            this.canvas.style.pointerEvents = visible ? 'auto' : 'none';
             console.log('👁️ Modelo visible:', visible);
         }
     }
@@ -764,6 +766,11 @@ class Model3DManager {
     // ===== Controles Interactivos =====
     enableControls() {
         if (!this.canvas) return;
+
+        // Mejorar soporte móvil: no permitir gestos del navegador
+        try {
+            this.canvas.style.touchAction = 'none'; // desactiva gestos por defecto (pinch/zoom del navegador)
+        } catch (_) {}
 
         // Rueda del ratón: escala
         this._wheelHandler = (e) => {
@@ -840,6 +847,8 @@ class Model3DManager {
         const centerPt = (t1, t2) => ({ x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 });
 
         this._touchStart = (e) => {
+            // Evitar scroll/zoom del navegador
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
             if (!this.model) return;
             this._touch.isTouching = true;
             if (e.touches.length === 1) {
@@ -860,6 +869,7 @@ class Model3DManager {
         };
 
         this._touchMove = (e) => {
+            if (e && typeof e.preventDefault === 'function') e.preventDefault();
             if (!this.model || !this._touch.isTouching) return;
             if (this._touch.isTwoFinger && e.touches.length >= 2) {
                 // Escala
@@ -896,10 +906,10 @@ class Model3DManager {
             this._controls.isDragging = false;
         };
 
-        this.canvas.addEventListener('touchstart', this._touchStart, { passive: true });
-        this.canvas.addEventListener('touchmove', this._touchMove, { passive: true });
-        this.canvas.addEventListener('touchend', this._touchEnd, { passive: true });
-        this.canvas.addEventListener('touchcancel', this._touchEnd, { passive: true });
+        this.canvas.addEventListener('touchstart', this._touchStart, { passive: false });
+        this.canvas.addEventListener('touchmove', this._touchMove, { passive: false });
+        this.canvas.addEventListener('touchend', this._touchEnd, { passive: false });
+        this.canvas.addEventListener('touchcancel', this._touchEnd, { passive: false });
     }
 
     _scaleBy(factor) {
