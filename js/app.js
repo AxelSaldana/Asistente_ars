@@ -239,7 +239,7 @@ class SpeechManager {
             const finish = (val) => {
                 if (settled) return;
                 settled = true;
-                try { rec.stop(); } catch (_) {}
+                try { rec.stop(); } catch (_) { }
                 this.isListening = false;
                 resolve(val);
             };
@@ -261,7 +261,7 @@ class SpeechManager {
                     if (event.results && event.results.length > 0) {
                         text = (event.results[0][0]?.transcript || '').trim();
                     }
-                } catch (_) {}
+                } catch (_) { }
                 finish(text && text.length > 0 ? text : null);
             };
 
@@ -467,7 +467,6 @@ class Model3DManager {
     async init() {
         try {
             console.log('🎭 Inicializando Model 3D...');
-{{ ... }}
 
             if (typeof THREE === 'undefined') {
                 throw new Error('Three.js no disponible');
@@ -716,23 +715,70 @@ class Model3DManager {
         };
 
         if (enable) {
+            // Click (desktop)
             this._tapHandler = (e) => {
                 e.preventDefault();
                 handleTap(e.clientX, e.clientY);
             };
-            this._touchEndHandler = (e) => {
-                if (!e.changedTouches || e.changedTouches.length === 0) return;
-                const t = e.changedTouches[0];
-                e.preventDefault();
-                handleTap(t.clientX, t.clientY);
-            };
             this.canvas.addEventListener('click', this._tapHandler, { passive: false });
-            this.canvas.addEventListener('touchend', this._touchEndHandler, { passive: false });
+
+            // Touch: solo disparar tap cuando NO hubo multitouch ni movimiento significativo
+            this._tapTouchStartHandler = (e) => {
+                if (!e.touches || e.touches.length === 0) return;
+                const t = e.touches[0];
+                this._tapStartX = t.clientX;
+                this._tapStartY = t.clientY;
+                this._tapStartTime = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+                // Si comenzó con más de un dedo, no es tap
+                this._tapHadMultiTouch = e.touches.length > 1;
+            };
+
+            this._tapTouchMoveHandler = (e) => {
+                // Si en cualquier momento hay 2+ dedos, marcar como multitouch
+                if (e.touches && e.touches.length > 1) {
+                    this._tapHadMultiTouch = true;
+                }
+            };
+
+            this._tapTouchEndHandler = (e) => {
+                if (!e.changedTouches || e.changedTouches.length === 0) return;
+                // Si aún quedan dedos en pantalla, no considerar como tap
+                if (e.touches && e.touches.length > 0) return;
+
+                const t = e.changedTouches[0];
+                const endX = t.clientX;
+                const endY = t.clientY;
+                const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - (this._tapStartTime || 0);
+                const dx = endX - (this._tapStartX || 0);
+                const dy = endY - (this._tapStartY || 0);
+                const moved = Math.hypot(dx, dy);
+
+                // Umbrales: 12px de movimiento y 500ms de duración
+                const isQuick = elapsed <= 500;
+                const isStationary = moved <= 12;
+
+                if (!this._tapHadMultiTouch && isQuick && isStationary) {
+                    e.preventDefault();
+                    handleTap(endX, endY);
+                }
+
+                // Reset flag para próximos toques
+                this._tapHadMultiTouch = false;
+            };
+
+            this.canvas.addEventListener('touchstart', this._tapTouchStartHandler, { passive: false });
+            this.canvas.addEventListener('touchmove', this._tapTouchMoveHandler, { passive: false });
+            this.canvas.addEventListener('touchend', this._tapTouchEndHandler, { passive: false });
         } else {
             if (this._tapHandler) this.canvas.removeEventListener('click', this._tapHandler);
-            if (this._touchEndHandler) this.canvas.removeEventListener('touchend', this._touchEndHandler);
             this._tapHandler = null;
-            this._touchEndHandler = null;
+            // Limpiar handlers táctiles de tap
+            if (this._tapTouchStartHandler) this.canvas.removeEventListener('touchstart', this._tapTouchStartHandler);
+            if (this._tapTouchMoveHandler) this.canvas.removeEventListener('touchmove', this._tapTouchMoveHandler);
+            if (this._tapTouchEndHandler) this.canvas.removeEventListener('touchend', this._tapTouchEndHandler);
+            this._tapTouchStartHandler = null;
+            this._tapTouchMoveHandler = null;
+            this._tapTouchEndHandler = null;
         }
     }
 
@@ -759,7 +805,7 @@ class Model3DManager {
             const box = new THREE.Box3().setFromObject(this.model);
             const center = box.getCenter(new THREE.Vector3());
             this.model.position.sub(center);
-        } catch (_) {}
+        } catch (_) { }
         this.model.position.y = 0;
         this.model.position.x = 0;
         this.model.position.z = 0;
