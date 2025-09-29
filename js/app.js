@@ -9,7 +9,7 @@ const CONFIG = {
         PATH: 'models/avatar_prueba.glb', // ← RUTA DIRECTA
         SCALE: 1.0,
         ANIMATIONS: {
-            IDLE: 'idle',
+            IDLE: 'action',
             TALKING: 'talking', 
             THINKING: 'thinking',
             LISTENING: 'listening'
@@ -477,6 +477,13 @@ class Model3DManager {
             scaleMin: 0.1,
             scaleMax: 10.0
         };
+        // Estado táctil (móvil)
+        this._touch = {
+            isTouching: false,
+            isTwoFinger: false,
+            startDist: 0,
+            lastCenter: { x: 0, y: 0 }
+        };
     }
 
     async init() {
@@ -823,6 +830,76 @@ class Model3DManager {
             }
         };
         window.addEventListener('keydown', this._keyHandler);
+
+        // ==== Gestos táctiles ====
+        const distance = (t1, t2) => {
+            const dx = t2.clientX - t1.clientX;
+            const dy = t2.clientY - t1.clientY;
+            return Math.hypot(dx, dy);
+        };
+        const centerPt = (t1, t2) => ({ x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 });
+
+        this._touchStart = (e) => {
+            if (!this.model) return;
+            this._touch.isTouching = true;
+            if (e.touches.length === 1) {
+                // rotación con un dedo
+                this._controls.isDragging = true;
+                this._controls.lastX = e.touches[0].clientX;
+                this._controls.lastY = e.touches[0].clientY;
+                this._touch.isTwoFinger = false;
+            } else if (e.touches.length >= 2) {
+                // pinch para escalar, pan para mover
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                this._touch.startDist = distance(t1, t2);
+                this._touch.lastCenter = centerPt(t1, t2);
+                this._touch.isTwoFinger = true;
+                this._controls.isDragging = false;
+            }
+        };
+
+        this._touchMove = (e) => {
+            if (!this.model || !this._touch.isTouching) return;
+            if (this._touch.isTwoFinger && e.touches.length >= 2) {
+                // Escala
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                const dist = distance(t1, t2);
+                const scaleFactor = dist / Math.max(this._touch.startDist, 1);
+                this._scaleBy(scaleFactor);
+                this._touch.startDist = dist;
+
+                // Pan (mover)
+                const c = centerPt(t1, t2);
+                const dx = (c.x - this._touch.lastCenter.x) * 0.01;
+                const dy = (c.y - this._touch.lastCenter.y) * 0.01;
+                this.model.position.x += dx;
+                this.model.position.y -= dy;
+                this._touch.lastCenter = c;
+            } else if (e.touches.length === 1 && this._controls.isDragging) {
+                // Rotar con un dedo
+                const tx = e.touches[0].clientX;
+                const ty = e.touches[0].clientY;
+                const dx = tx - this._controls.lastX;
+                const dy = ty - this._controls.lastY;
+                this._controls.lastX = tx;
+                this._controls.lastY = ty;
+                this.model.rotation.y += dx * this._controls.rotateSpeed;
+                this.model.rotation.x += dy * this._controls.rotateSpeed;
+            }
+        };
+
+        this._touchEnd = () => {
+            this._touch.isTouching = false;
+            this._touch.isTwoFinger = false;
+            this._controls.isDragging = false;
+        };
+
+        this.canvas.addEventListener('touchstart', this._touchStart, { passive: true });
+        this.canvas.addEventListener('touchmove', this._touchMove, { passive: true });
+        this.canvas.addEventListener('touchend', this._touchEnd, { passive: true });
+        this.canvas.addEventListener('touchcancel', this._touchEnd, { passive: true });
     }
 
     _scaleBy(factor) {
@@ -842,6 +919,12 @@ class Model3DManager {
         if (this._pointerMove) window.removeEventListener('mousemove', this._pointerMove);
         if (this._pointerUp) window.removeEventListener('mouseup', this._pointerUp);
         if (this._keyHandler) window.removeEventListener('keydown', this._keyHandler);
+        if (this.canvas && this._touchStart) this.canvas.removeEventListener('touchstart', this._touchStart);
+        if (this.canvas && this._touchMove) this.canvas.removeEventListener('touchmove', this._touchMove);
+        if (this.canvas && this._touchEnd) {
+            this.canvas.removeEventListener('touchend', this._touchEnd);
+            this.canvas.removeEventListener('touchcancel', this._touchEnd);
+        }
     }
 }
 
