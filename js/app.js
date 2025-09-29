@@ -447,7 +447,6 @@ class Model3DManager {
             startDist: 0,
             lastCenter: { x: 0, y: 0 }
         };
-
         // Tap-to-place (AR)
         this._raycaster = new THREE.Raycaster();
         this._ndc = new THREE.Vector2();
@@ -455,11 +454,20 @@ class Model3DManager {
         this._tapPlacementEnabled = false;
         this._tapHandler = null;
         this._touchEndHandler = null;
+        // Tap detection state to avoid triggering placement after pinch
+        this._tapTouchStartHandler = null;
+        this._tapTouchMoveHandler = null;
+        this._tapTouchEndHandler = null;
+        this._tapStartX = 0;
+        this._tapStartY = 0;
+        this._tapStartTime = 0;
+        this._tapHadMultiTouch = false;
     }
 
     async init() {
         try {
             console.log('🎭 Inicializando Model 3D...');
+{{ ... }}
 
             if (typeof THREE === 'undefined') {
                 throw new Error('Three.js no disponible');
