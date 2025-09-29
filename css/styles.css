@@ -101,6 +101,8 @@ body {
     justify-content: center;
     z-index: 10000;
     transition: opacity 0.3s ease;
+    /* Permitir interactuar con el canvas detrás, pero mantener el modal clickeable */
+    pointer-events: none;
 }
 
 .permission-modal.hidden {
@@ -117,6 +119,7 @@ body {
     width: 90%;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     animation: modalSlideIn 0.3s ease-out;
+    pointer-events: auto; /* El contenido sí recibe clics */
 }
 
 @keyframes modalSlideIn {
@@ -193,14 +196,14 @@ body {
     left: 50%;
     transform: translateX(-50%);
     display: flex;
-    flex-wrap: wrap; /* permitir salto de línea en móviles */
-    gap: 12px 14px; /* row-gap y column-gap */
+    flex-wrap: nowrap; /* una sola fila */
+    gap: 12px; 
     background: rgba(255, 255, 255, 0.1);
     padding: clamp(10px, 2.5vw, 16px) clamp(12px, 3vw, 20px);
     border-radius: 25px;
     backdrop-filter: blur(15px);
     border: 1px solid rgba(255, 255, 255, 0.2);
-    max-width: min(95vw, 640px);
+    max-width: min(95vw, 520px);
     justify-content: center;
 }
 
@@ -465,8 +468,10 @@ button:active {
 }
 
 .ar-input-container {
-    display: flex;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: 1fr auto auto; /* input | enviar | mic */
+    align-items: center;
+    gap: 10px;
     background: rgba(255, 255, 255, 0.95);
     padding: 15px 18px;
     border-radius: 25px;
@@ -477,13 +482,20 @@ button:active {
 }
 
 .ar-input-container input {
-    flex: 1;
+    min-width: 0; /* evitar overflow al reducirse */
     border: none;
     outline: none;
     padding: 8px 12px;
     background: transparent;
     font-size: 16px;
     color: #333;
+}
+
+.ar-input-container .ar-send-btn,
+.ar-input-container .voice-btn {
+    flex: 0 0 auto;
+    min-width: 44px;
+    min-height: 44px;
 }
 
 .ar-input-container input::placeholder {

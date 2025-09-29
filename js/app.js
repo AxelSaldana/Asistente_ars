@@ -627,11 +627,6 @@ class Model3DManager {
     setupScene() {
         this.scene = new THREE.Scene();
         this.scene.background = this.isARMode ? null : new THREE.Color(0x87CEEB);
-
-        // Grid para referencia
-        const gridHelper = new THREE.GridHelper(10, 10);
-        gridHelper.position.y = 0;
-        this.scene.add(gridHelper);
     }
 
     setupCamera() {
@@ -1179,7 +1174,8 @@ class VirtualAssistantApp {
 
     exitARMode() {
         this.isInAR = false;
-        this.enterNormalMode();
+        // Al salir de AR, volver a Preview para mantener el modelo visible
+        this.enterPreviewMode();
 
         if (this.ui.arChat) this.ui.arChat.style.display = 'none';
         if (this.ui.arResponse) this.ui.arResponse.innerHTML = '';
