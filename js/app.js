@@ -9,10 +9,10 @@ const CONFIG = {
         PATH: 'models/avatar_prueba.glb', // ← RUTA DIRECTA
         SCALE: 1.0,
         ANIMATIONS: {
-            IDLE: 'action',
-            TALKING: 'talking', 
-            THINKING: 'thinking',
-            LISTENING: 'listening'
+            IDLE: 'Animation',
+            TALKING: 'Animation',
+            THINKING: 'Animation',
+            LISTENING: 'Animation'
         }
     },
     GEMINI: {
@@ -43,7 +43,7 @@ class GeminiClient {
     async init() {
         try {
             console.log('🤖 CONECTANDO GEMINI 2.0...');
-            
+
             const testResult = await this.testConnection();
             if (testResult) {
                 this.isInitialized = true;
@@ -70,7 +70,7 @@ class GeminiClient {
 
     async sendDirectToGemini(message) {
         const url = `${this.baseURL}/${this.model}:generateContent?key=${this.apiKey}`;
-        
+
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -89,14 +89,14 @@ class GeminiClient {
         }
 
         const data = await response.json();
-        
+
         if (data.candidates && data.candidates.length > 0) {
             const content = data.candidates[0].content;
             if (content && content.parts && content.parts.length > 0) {
                 return content.parts[0].text.trim();
             }
         }
-        
+
         throw new Error('Respuesta inválida');
     }
 
@@ -114,7 +114,7 @@ Usuario: ${message}
 Avatar:`;
 
             const response = await this.sendDirectToGemini(prompt);
-            
+
             this.addToHistory('user', message);
             this.addToHistory('assistant', response);
 
@@ -173,7 +173,7 @@ class SpeechManager {
 
             this.setupSpeechRecognition();
             await this.setupSpeechSynthesis();
-            
+
             this.isInitialized = true;
             return true;
         } catch (error) {
@@ -278,7 +278,7 @@ class SpeechManager {
             const timeout = setTimeout(() => {
                 if (!resolved) {
                     resolved = true;
-                    try { this.recognition.stop(); } catch (e) {}
+                    try { this.recognition.stop(); } catch (e) { }
                     resolve(null);
                 }
             }, CONFIG.SPEECH.RECOGNITION_TIMEOUT);
@@ -287,7 +287,7 @@ class SpeechManager {
                 if (resolved) return;
                 resolved = true;
                 clearTimeout(timeout);
-                
+
                 if (event.results.length > 0) {
                     const transcript = event.results[0][0].transcript;
                     resolve(transcript.trim());
@@ -332,7 +332,7 @@ class SpeechManager {
 
             return new Promise((resolve) => {
                 this.currentUtterance = new SpeechSynthesisUtterance(text);
-                
+
                 if (this.selectedVoice) {
                     this.currentUtterance.voice = this.selectedVoice;
                 }
@@ -381,7 +381,7 @@ class CameraManager {
         this.videoElement = null;
         this.stream = null;
         this.isInitialized = false;
-        
+
         this.constraints = {
             video: {
                 facingMode: { ideal: 'environment' },
@@ -489,7 +489,7 @@ class Model3DManager {
     async init() {
         try {
             console.log('🎭 Inicializando Model 3D...');
-            
+
             if (typeof THREE === 'undefined') {
                 throw new Error('Three.js no disponible');
             }
@@ -498,7 +498,7 @@ class Model3DManager {
             this.setupScene();
             this.setupCamera();
             this.setupLights();
-            
+
             // CARGAR TU MODELO DIRECTAMENTE
             try {
                 await this.loadModel();
@@ -509,7 +509,7 @@ class Model3DManager {
             }
             // Activar controles interactivos
             this.enableControls();
-            
+
             this.startRenderLoop();
             console.log('✅ Model 3D Manager listo');
         } catch (error) {
@@ -522,9 +522,9 @@ class Model3DManager {
     async loadModel() {
         return new Promise((resolve, reject) => {
             console.log('📦 CARGANDO:', CONFIG.MODEL.PATH);
-            
+
             const loader = new THREE.GLTFLoader();
-            
+
             // Configurar DRACO si está disponible
             if (THREE.DRACOLoader) {
                 const dracoLoader = new THREE.DRACOLoader();
@@ -532,26 +532,26 @@ class Model3DManager {
                 loader.setDRACOLoader(dracoLoader);
                 console.log('🗜️ DRACO configurado');
             }
-            
+
             loader.load(
                 CONFIG.MODEL.PATH,
                 (gltf) => {
                     console.log('🎉 ¡AVATAR_PRUEBA.GLB CARGADO!');
-                    
+
                     this.model = gltf.scene;
                     this.modelLoaded = true;
-                    
+
                     // Configurar escala
                     this.model.scale.setScalar(CONFIG.MODEL.SCALE);
-                    
+
                     // Centrar modelo
                     const box = new THREE.Box3().setFromObject(this.model);
                     const center = box.getCenter(new THREE.Vector3());
                     const size = box.getSize(new THREE.Vector3());
-                    
+
                     console.log('📏 Tamaño de tu modelo:', size);
                     console.log('📍 Centro de tu modelo:', center);
-                    
+
                     this.model.position.sub(center);
                     this.model.position.y = 0;
 
@@ -590,21 +590,21 @@ class Model3DManager {
 
     createTemporaryModel() {
         console.log('🔧 Creando modelo temporal visible...');
-        
+
         // Crear cubo brillante que se vea
         const geometry = new THREE.BoxGeometry(2, 2, 2);
-        const material = new THREE.MeshPhongMaterial({ 
+        const material = new THREE.MeshPhongMaterial({
             color: 0xff4444,
             shininess: 100
         });
-        
+
         this.model = new THREE.Mesh(geometry, material);
         this.model.position.set(0, 1, 0);
         this.model.castShadow = true;
         this.modelLoaded = true;
-        
+
         this.scene.add(this.model);
-        
+
         console.log('✅ CUBO ROJO TEMPORAL CREADO');
     }
 
@@ -614,7 +614,7 @@ class Model3DManager {
             alpha: true,
             antialias: true
         });
-        
+
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.outputEncoding = THREE.sRGBEncoding;
@@ -625,7 +625,7 @@ class Model3DManager {
     setupScene() {
         this.scene = new THREE.Scene();
         this.scene.background = this.isARMode ? null : new THREE.Color(0x87CEEB);
-        
+
         // Grid para referencia
         const gridHelper = new THREE.GridHelper(10, 10);
         gridHelper.position.y = 0;
@@ -659,7 +659,7 @@ class Model3DManager {
 
     setupAnimations(animations) {
         this.mixer = new THREE.AnimationMixer(this.model);
-        
+
         animations.forEach((clip) => {
             const action = this.mixer.clipAction(clip);
             this.animations[clip.name.toLowerCase()] = action;
@@ -706,7 +706,7 @@ class Model3DManager {
 
     setARMode(isAR) {
         this.isARMode = isAR;
-        
+
         if (isAR) {
             this.scene.background = null;
             this.renderer.setClearColor(0x000000, 0);
@@ -950,7 +950,7 @@ class VirtualAssistantApp {
         this.ui = {
             loadingScreen: document.getElementById('loadingScreen'),
             permissionModal: document.getElementById('permissionModal'),
-            
+
             mainControls: document.getElementById('mainControls'),
             chatBtn: document.getElementById('chatBtn'),
             arBtn: document.getElementById('arBtn'),
@@ -1015,7 +1015,7 @@ class VirtualAssistantApp {
             this.updatePermissionStatus('📷 Inicializando cámara...');
             this.cameraManager = new CameraManager();
             const cameraSuccess = await this.cameraManager.init();
-            
+
             if (!cameraSuccess) {
                 throw new Error('No se pudo acceder a la cámara');
             }
@@ -1023,19 +1023,19 @@ class VirtualAssistantApp {
             // 2. Gemini 2.0
             this.updatePermissionStatus('🤖 Conectando Gemini 2.0...');
             const aiSuccess = await this.gemini.init();
-            
+
             if (!aiSuccess) {
                 throw new Error('No se pudo conectar con Gemini 2.0');
             }
 
             // 3. Speech
-        this.updatePermissionStatus('🎤 Configurando voz...');
-        const speechOk = await this.speech.init();
-        if (!speechOk) {
-            const reason = (this.speech && this.speech.unsupportedReason) ? this.speech.unsupportedReason : 'Voz no disponible';
-            this.updatePermissionStatus(`❌ ${reason}`);
-            throw new Error(reason);
-        }
+            this.updatePermissionStatus('🎤 Configurando voz...');
+            const speechOk = await this.speech.init();
+            if (!speechOk) {
+                const reason = (this.speech && this.speech.unsupportedReason) ? this.speech.unsupportedReason : 'Voz no disponible';
+                this.updatePermissionStatus(`❌ ${reason}`);
+                throw new Error(reason);
+            }
 
             // 4. Modelo 3D
             this.updatePermissionStatus('🎭 Cargando models/avatar_prueba.glb...');
@@ -1053,7 +1053,7 @@ class VirtualAssistantApp {
         } catch (error) {
             console.error('❌ ERROR CRÍTICO:', error);
             this.updatePermissionStatus(`❌ ${error.message}`);
-            
+
             const btn = document.getElementById('requestPermissions');
             if (btn) {
                 btn.textContent = '🔄 Reintentar';
@@ -1086,7 +1086,7 @@ class VirtualAssistantApp {
 
     enterPreviewMode() {
         console.log('🎭 Mostrando modelo...');
-        
+
         this.isInPreview = true;
         this.isInAR = false;
 
@@ -1235,11 +1235,11 @@ class VirtualAssistantApp {
             try {
                 const welcomeMsg = await this.gemini.getWelcomeMessage();
                 this.addMessage('assistant', welcomeMsg);
-                
+
                 if (this.speech) {
                     this.speech.speak(welcomeMsg);
                 }
-                
+
                 if (this.isInPreview && this.model3dManager) {
                     this.model3dManager.playTalkingAnimation();
                 }
@@ -1258,11 +1258,11 @@ class VirtualAssistantApp {
         if (this.ui.chatModal) {
             this.ui.chatModal.style.display = 'none';
         }
-        
+
         if (this.speech) {
             this.speech.stopSpeaking();
         }
-        
+
         if ((this.isInPreview || this.isInAR) && this.model3dManager) {
             this.model3dManager.playIdleAnimation();
         }
@@ -1270,7 +1270,7 @@ class VirtualAssistantApp {
 
     async sendMessage() {
         if (!this.ui.userInput) return;
-        
+
         const message = this.ui.userInput.value.trim();
         if (!message || this.isProcessing) return;
 
@@ -1281,7 +1281,7 @@ class VirtualAssistantApp {
 
     async sendARMessage() {
         if (!this.ui.arInput) return;
-        
+
         const message = this.ui.arInput.value.trim();
         if (!message || this.isProcessing) return;
 
@@ -1292,16 +1292,16 @@ class VirtualAssistantApp {
     async processMessage(message, isAR = false) {
         this.isProcessing = true;
         this.updateChatStatus('🤔 Preguntando a Gemini 2.0...');
-        
+
         if ((this.isInPreview || this.isInAR) && this.model3dManager) {
             this.model3dManager.playThinkingAnimation();
         }
 
         try {
             console.log('🧠 Enviando a Gemini 2.0:', message);
-            
+
             const response = await this.gemini.sendMessage(message);
-            
+
             console.log('💭 Respuesta Gemini 2.0:', response);
 
             if (isAR && this.ui.arResponse) {
@@ -1318,7 +1318,7 @@ class VirtualAssistantApp {
             if (this.speech) {
                 this.speech.speak(response);
             }
-            
+
             if ((this.isInPreview || this.isInAR) && this.model3dManager) {
                 this.model3dManager.playTalkingAnimation();
             }
@@ -1338,7 +1338,7 @@ class VirtualAssistantApp {
             this.updateChatStatus('❌ Error Gemini 2.0');
         } finally {
             this.isProcessing = false;
-            
+
             setTimeout(() => {
                 if ((this.isInPreview || this.isInAR) && this.model3dManager) {
                     this.model3dManager.playIdleAnimation();
@@ -1363,19 +1363,19 @@ class VirtualAssistantApp {
         try {
             console.log('🎤 Iniciando reconocimiento...');
             this.updateChatStatus('🎤 Habla ahora...');
-            
+
             if ((this.isInPreview || this.isInAR) && this.model3dManager) {
                 this.model3dManager.playListeningAnimation();
             }
 
             const transcript = await this.speech.listen();
-            
+
             if (transcript && transcript.length > 1) {
                 console.log('👂 Reconocido:', transcript);
                 await this.processMessage(transcript, isAR);
             } else {
                 this.updateChatStatus('🤷 No se detectó voz');
-                
+
                 if ((this.isInPreview || this.isInAR) && this.model3dManager) {
                     this.model3dManager.playIdleAnimation();
                 }
@@ -1384,7 +1384,7 @@ class VirtualAssistantApp {
         } catch (error) {
             console.error('❌ Error voz:', error);
             this.updateChatStatus('❌ Error micrófono');
-            
+
             if ((this.isInPreview || this.isInAR) && this.model3dManager) {
                 this.model3dManager.playIdleAnimation();
             }
@@ -1396,18 +1396,18 @@ class VirtualAssistantApp {
 
         try {
             const welcomeMsg = await this.gemini.getARWelcomeMessage();
-            
+
             this.ui.arResponse.innerHTML = `
                 <div style="color: #00ff88; font-size: 18px; margin-bottom: 10px;">
                     🤖 ¡Avatar con Gemini 2.0 en AR!
                 </div>
                 <div>${welcomeMsg}</div>
             `;
-            
+
             if (this.speech) {
                 this.speech.speak(welcomeMsg);
             }
-            
+
             if (this.model3dManager) {
                 this.model3dManager.playTalkingAnimation();
             }
@@ -1426,17 +1426,17 @@ class VirtualAssistantApp {
 
     addMessage(sender, text) {
         if (!this.ui.chatMessages) return;
-        
+
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${sender}`;
-        
+
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
         contentDiv.textContent = text;
-        
+
         messageDiv.appendChild(contentDiv);
         this.ui.chatMessages.appendChild(messageDiv);
-        
+
         this.ui.chatMessages.scrollTop = this.ui.chatMessages.scrollHeight;
     }
 
