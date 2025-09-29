@@ -160,11 +160,14 @@ class SpeechManager {
         this.voices = [];
         this.selectedVoice = null;
         this.isInitialized = false;
+        this.unsupportedReason = '';
+        this.lastError = '';
     }
 
     async init() {
         try {
             if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                this.unsupportedReason = 'Este navegador no soporta reconocimiento de voz. Usa Chrome/Edge en escritorio o HTTPS en móvil.';
                 return false;
             }
 
@@ -174,6 +177,7 @@ class SpeechManager {
             this.isInitialized = true;
             return true;
         } catch (error) {
+            this.unsupportedReason = 'No se pudo inicializar la voz: ' + (error?.message || 'desconocido');
             return false;
         }
     }
@@ -189,7 +193,11 @@ class SpeechManager {
 
         this.recognition.onstart = () => this.isListening = true;
         this.recognition.onend = () => this.isListening = false;
-        this.recognition.onerror = () => this.isListening = false;
+        this.recognition.onerror = (e) => {
+            this.isListening = false;
+            this.lastError = e && e.error ? e.error : 'unknown_error';
+            console.warn('SpeechRecognition error:', this.lastError);
+        };
     }
 
     async setupSpeechSynthesis() {
@@ -796,8 +804,13 @@ class VirtualAssistantApp {
             }
 
             // 3. Speech
-            this.updatePermissionStatus('🎤 Configurando voz...');
-            await this.speech.init();
+        this.updatePermissionStatus('🎤 Configurando voz...');
+        const speechOk = await this.speech.init();
+        if (!speechOk) {
+            const reason = (this.speech && this.speech.unsupportedReason) ? this.speech.unsupportedReason : 'Voz no disponible';
+            this.updatePermissionStatus(`❌ ${reason}`);
+            throw new Error(reason);
+        }
 
             // 4. Modelo 3D
             this.updatePermissionStatus('🎭 Cargando models/avatar_prueba.glb...');
@@ -1111,7 +1124,16 @@ class VirtualAssistantApp {
     }
 
     async startVoiceInteraction(isAR = false) {
-        if (this.isProcessing || !this.speech) return;
+        if (this.isProcessing) return;
+        if (!this.speech) {
+            this.updateChatStatus('❌ Voz no inicializada');
+            return;
+        }
+        if (!this.speech.isInitialized) {
+            const reason = this.speech.unsupportedReason || 'Reconocimiento de voz no disponible en este navegador o contexto.';
+            this.updateChatStatus(`❌ ${reason}`);
+            return;
+        }
 
         try {
             console.log('🎤 Iniciando reconocimiento...');
