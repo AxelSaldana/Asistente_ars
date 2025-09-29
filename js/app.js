@@ -28,7 +28,7 @@ const CONFIG = {
         VOICE_RATE: 1.0,
         VOICE_PITCH: 1.0,
         VOICE_VOLUME: 1.0,
-        RECOGNITION_TIMEOUT: 8000
+        RECOGNITION_TIMEOUT: 15000
     }
 };
 
@@ -183,7 +183,11 @@ class SpeechManager {
             }
 
             this.setupSpeechRecognition();
-            await this.setupSpeechSynthesis();
+            if (typeof this.setupSpeechSynthesis === 'function') {
+                await this.setupSpeechSynthesis();
+            } else {
+                console.warn('setupSpeechSynthesis no disponible; continuo sin TTS');
+            }
 
             this.isInitialized = true;
             return true;
@@ -442,6 +446,14 @@ class Model3DManager {
             startDist: 0,
             lastCenter: { x: 0, y: 0 }
         };
+
+        // Tap-to-place (AR)
+        this._raycaster = new THREE.Raycaster();
+        this._ndc = new THREE.Vector2();
+        this._groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // y = 0
+        this._tapPlacementEnabled = false;
+        this._tapHandler = null;
+        this._touchEndHandler = null;
     }
 
     async init() {
@@ -669,6 +681,49 @@ class Model3DManager {
         } else {
             this.scene.background = new THREE.Color(0x87CEEB);
             this.renderer.setClearColor(0x87CEEB, 1);
+        }
+    }
+
+    enableTapPlacement(enable = true) {
+        if (!this.canvas) return;
+        if (enable === this._tapPlacementEnabled) return;
+        this._tapPlacementEnabled = enable;
+
+        const handleTap = (clientX, clientY) => {
+            if (!this.camera || !this.model) return;
+            const rect = this.canvas.getBoundingClientRect();
+            const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+            const y = -((clientY - rect.top) / rect.height) * 2 + 1;
+            this._ndc.set(x, y);
+            this._raycaster.setFromCamera(this._ndc, this.camera);
+            const hit = new THREE.Vector3();
+            if (this._raycaster.ray.intersectPlane(this._groundPlane, hit)) {
+                this.model.position.x = hit.x;
+                this.model.position.z = hit.z;
+                // Mantener en el piso
+                this.model.position.y = 0;
+                console.log('📍 Colocado en:', hit.x.toFixed(2), hit.z.toFixed(2));
+            }
+        };
+
+        if (enable) {
+            this._tapHandler = (e) => {
+                e.preventDefault();
+                handleTap(e.clientX, e.clientY);
+            };
+            this._touchEndHandler = (e) => {
+                if (!e.changedTouches || e.changedTouches.length === 0) return;
+                const t = e.changedTouches[0];
+                e.preventDefault();
+                handleTap(t.clientX, t.clientY);
+            };
+            this.canvas.addEventListener('click', this._tapHandler, { passive: false });
+            this.canvas.addEventListener('touchend', this._touchEndHandler, { passive: false });
+        } else {
+            if (this._tapHandler) this.canvas.removeEventListener('click', this._tapHandler);
+            if (this._touchEndHandler) this.canvas.removeEventListener('touchend', this._touchEndHandler);
+            this._tapHandler = null;
+            this._touchEndHandler = null;
         }
     }
 
@@ -1110,6 +1165,8 @@ class VirtualAssistantApp {
         if (this.model3dManager) {
             this.model3dManager.setVisible(true);
             this.model3dManager.setARMode(true);
+            // Habilitar tap-to-place en AR
+            this.model3dManager.enableTapPlacement(true);
         }
 
         if (this.ui.mainControls) this.ui.mainControls.style.display = 'none';
@@ -1137,7 +1194,11 @@ class VirtualAssistantApp {
         if (this.ui.arResponse) this.ui.arResponse.innerHTML = '';
         if (this.ui.arInput) this.ui.arInput.value = '';
 
-        if (this.model3dManager) this.model3dManager.setARMode(false);
+        if (this.model3dManager) {
+            this.model3dManager.setARMode(false);
+            // Deshabilitar tap-to-place fuera de AR
+            this.model3dManager.enableTapPlacement(false);
+        }
     }
 
     toggleAR() {
