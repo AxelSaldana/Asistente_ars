@@ -6,10 +6,10 @@
 const CONFIG = {
     MODEL: {
         PATH: 'models/avatar_prueba.glb', // ← RUTA DIRECTA
-        SCALE: 1.0,
+        SCALE: 3,
         AUTO_ROTATE: false,
         ROTATE_SPEED: 0.005,
-        ANIMATION_SPEED: 1.4, // velocidad 20% más rápida
+        ANIMATION_SPEED: 2, // velocidad 20% más rápida
         ANIMATIONS: {
             IDLE: 'Animation',
             TALKING: 'animation',
@@ -1221,7 +1221,14 @@ class VirtualAssistantApp {
         if (this.ui.arBtn) this.ui.arBtn.addEventListener('click', () => this.toggleAR());
         if (this.ui.chatBtn) this.ui.chatBtn.addEventListener('click', () => this.openChat());
         if (this.ui.voiceBtn) this.ui.voiceBtn.addEventListener('click', () => this.startVoiceInteraction());
-        if (this.ui.modelBtn) this.ui.modelBtn.addEventListener('click', () => this.toggleModel());
+        if (this.ui.modelBtn) this.ui.modelBtn.addEventListener('click', () => {
+            if (!this.isInitialized) {
+                this.showPermissionModal();
+                return;
+            }
+            // Forzar mostrar el modelo en Preview
+            this.enterPreviewMode();
+        });
 
         if (this.ui.sendBtn) this.ui.sendBtn.addEventListener('click', () => this.sendMessage());
         if (this.ui.closeBtn) this.ui.closeBtn.addEventListener('click', () => this.closeChat());

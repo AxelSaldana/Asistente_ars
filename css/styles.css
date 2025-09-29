@@ -441,7 +441,7 @@ button:active {
 /* ===== AR CHAT (IGUAL QUE PROYECTO FUNCIONANDO) ===== */
 .ar-chat {
     position: fixed;
-    bottom: 20px;
+    bottom: calc(20px + env(safe-area-inset-bottom));
     left: 20px;
     right: 20px;
     display: none;
@@ -504,24 +504,30 @@ button:active {
 
 .ar-controls {
     text-align: center;
+    margin-top: 8px;
 }
 
 .ar-close-btn {
     background: linear-gradient(45deg, #ff4757, #ff3742);
     color: white;
-    padding: 12px 25px;
+    padding: 12px 24px;
     border: none;
-    border-radius: 25px;
+    border-radius: 28px; /* más redondeado para tacto */
     font-size: 16px;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    box-shadow: 0 5px 20px rgba(255, 71, 87, 0.3);
-    transition: all 0.3s ease;
+    box-shadow: 0 6px 24px rgba(255, 71, 87, 0.35);
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 120px;
 }
 
 .ar-close-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 30px rgba(255, 71, 87, 0.5);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 32px rgba(255, 71, 87, 0.5);
 }
 
 /* ===== STATUS DISPLAY ===== */
