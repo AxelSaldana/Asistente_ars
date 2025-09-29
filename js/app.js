@@ -153,7 +153,7 @@ Avatar:`;
 class SpeechManager {
     constructor() {
         this.recognition = null;
-        this.synthesis = window.speechSynthesis;
+        this.synthesis = (typeof window !== 'undefined' && 'speechSynthesis' in window) ? window.speechSynthesis : null;
         this.isListening = false;
         this.isSpeaking = false;
         this.currentUtterance = null;
@@ -202,23 +202,61 @@ class SpeechManager {
 
     async setupSpeechSynthesis() {
         return new Promise((resolve) => {
+            // Si no hay speechSynthesis, continuar sin voces
+            if (!this.synthesis) {
+                console.warn('speechSynthesis no disponible. Continuando sin síntesis de voz.');
+                return resolve();
+            }
+
             const loadVoices = () => {
-                this.voices = this.synthesis.getVoices();
-                
-                if (this.voices.length > 0) {
+                try {
+                    this.voices = this.synthesis.getVoices ? this.synthesis.getVoices() : [];
+                } catch (e) {
+                    this.voices = [];
+                }
+
+                if (this.voices && this.voices.length > 0) {
                     const spanishVoices = this.voices.filter(voice => 
-                        voice.lang.includes('es') || voice.lang.includes('ES')
+                        voice.lang && (voice.lang.includes('es') || voice.lang.includes('ES'))
                     );
-                    
                     this.selectedVoice = spanishVoices.length > 0 ? spanishVoices[0] : this.voices[0];
                     resolve();
-                } else {
-                    setTimeout(loadVoices, 100);
                 }
             };
 
-            this.synthesis.onvoiceschanged = loadVoices;
+            // Intentar registrar evento de cambio de voces de forma segura
+            try {
+                if (typeof this.synthesis.addEventListener === 'function') {
+                    this.synthesis.addEventListener('voiceschanged', loadVoices);
+                } else if ('onvoiceschanged' in this.synthesis) {
+                    this.synthesis.onvoiceschanged = loadVoices;
+                } else if (typeof window !== 'undefined' && window.addEventListener) {
+                    // Algunas implementaciones disparan el evento en window
+                    window.addEventListener('voiceschanged', loadVoices);
+                }
+            } catch (e) {
+                // Ignorar errores aquí; continuaremos con reintentos y timeout
+            }
+
+            // Llamada inicial inmediata
             loadVoices();
+
+            // Reintentos progresivos por si las voces tardan en poblarse
+            let attempts = 0;
+            const maxAttempts = 20; // ~2s si usamos 100ms
+            const interval = setInterval(() => {
+                if (this.voices && this.voices.length > 0) {
+                    clearInterval(interval);
+                    return; // resolve ya fue llamado en loadVoices
+                }
+                attempts++;
+                loadVoices();
+                if (attempts >= maxAttempts) {
+                    clearInterval(interval);
+                    // Continuar sin voces específicas
+                    resolve();
+                }
+            }, 100);
         });
     }
 
