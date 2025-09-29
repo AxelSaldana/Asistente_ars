@@ -429,6 +429,7 @@ class Model3DManager {
         this.clock = new THREE.Clock();
         this.isVisible = false;
         this.modelLoaded = false;
+        this.defaultScale = (CONFIG && CONFIG.MODEL && CONFIG.MODEL.SCALE) ? CONFIG.MODEL.SCALE : 1.0;
         // Controles
         this._controls = {
             isDragging: false,
@@ -736,6 +737,34 @@ class Model3DManager {
             this.canvas.style.pointerEvents = visible ? 'auto' : 'none';
             console.log('👁️ Modelo visible:', visible);
         }
+    }
+
+    // Restablece escala, posición y rotación a un estado cómodo para Preview
+    resetForPreview() {
+        if (!this.model) return;
+        // Escala por defecto
+        const s = this.defaultScale || 1.0;
+        this.model.scale.setScalar(s);
+        // Centrado en origen, sobre el piso (y=0)
+        // Recalcular caja para centrar si es necesario
+        try {
+            const box = new THREE.Box3().setFromObject(this.model);
+            const center = box.getCenter(new THREE.Vector3());
+            this.model.position.sub(center);
+        } catch (_) {}
+        this.model.position.y = 0;
+        this.model.position.x = 0;
+        this.model.position.z = 0;
+        // Rotación cómoda
+        this.model.rotation.set(0, 0, 0);
+        // Cámara de preview
+        if (this.camera) {
+            this.camera.position.set(0, 3, 5);
+            this.camera.lookAt(0, 1, 0);
+        }
+        // Animación idle
+        this.playIdleAnimation();
+        console.log('✅ Reset preview: escala', s);
     }
 
     handleResize() {
@@ -1139,6 +1168,8 @@ class VirtualAssistantApp {
         if (this.model3dManager) {
             this.model3dManager.setVisible(true);
             this.model3dManager.setARMode(false);
+            // Asegurar escala y posición correctas en Preview
+            this.model3dManager.resetForPreview();
         }
 
         if (this.ui.mainControls) this.ui.mainControls.style.display = 'flex';
@@ -1198,6 +1229,8 @@ class VirtualAssistantApp {
             this.model3dManager.setARMode(false);
             // Deshabilitar tap-to-place fuera de AR
             this.model3dManager.enableTapPlacement(false);
+            // Restablecer pose y escala en Preview
+            this.model3dManager.resetForPreview();
         }
     }
 
@@ -1245,6 +1278,9 @@ class VirtualAssistantApp {
             }
             // Forzar mostrar el modelo en Preview
             this.enterPreviewMode();
+            if (this.model3dManager) {
+                this.model3dManager.resetForPreview();
+            }
         });
 
         if (this.ui.sendBtn) this.ui.sendBtn.addEventListener('click', () => this.sendMessage());
@@ -1381,20 +1417,30 @@ class VirtualAssistantApp {
             if ((this.isInPreview || this.isInAR) && this.model3dManager) {
                 this.model3dManager.playTalkingAnimation();
             }
-
             this.updateChatStatus('✅ Respuesta de Gemini 2.0');
 
         } catch (error) {
             console.error('❌ Error Gemini 2.0:', error);
-            const errorMsg = `Error Gemini 2.0: ${error.message}`;
+            const fallback = 'Lo siento, ahora mismo no puedo ayudarte con eso. ¿Podrías reformular tu pregunta o intentar con otro tema?';
+            const suggestions = 'Sugerencias: "Cuéntame un dato curioso", "¿Qué clima hay en Madrid?", "Explícame HTML en 1 frase", "Dime un chiste corto".';
 
             if (isAR && this.ui.arResponse) {
-                this.ui.arResponse.innerHTML = `<div style="color: #ff6b6b;">❌ ${errorMsg}</div>`;
+                this.ui.arResponse.innerHTML = `
+                    <div style="color: #ffd166;">
+                        🤔 ${fallback}
+                    </div>
+                    <div style="margin-top:8px;color:#ddd;">${suggestions}</div>
+                `;
             } else {
-                this.addMessage('assistant', errorMsg);
+                this.addMessage('assistant', `${fallback}\n\n${suggestions}`);
             }
 
-            this.updateChatStatus('❌ Error Gemini 2.0');
+            if (this.speech) {
+                this.speech.speak(`${fallback} ${suggestions}`);
+            }
+
+            this.updateChatStatus('');
+
         } finally {
             this.isProcessing = false;
 
