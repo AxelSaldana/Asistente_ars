@@ -2,17 +2,18 @@
  * Asistente Virtual AR - SIMPLE Y DIRECTO
  * Modelo: models/avatar_prueba.glb
  */
-
 // ===== CONFIGURACIÓN SIMPLE =====
 const CONFIG = {
     MODEL: {
         PATH: 'models/avatar_prueba.glb', // ← RUTA DIRECTA
         SCALE: 1.0,
+        AUTO_ROTATE: false,
+        ROTATE_SPEED: 0.005,
         ANIMATIONS: {
             IDLE: 'Animation',
-            TALKING: 'Animation',
-            THINKING: 'Animation',
-            LISTENING: 'Animation'
+            TALKING: 'animation', 
+            THINKING: 'animation',
+            LISTENING: 'animation'
         }
     },
     GEMINI: {
@@ -749,8 +750,8 @@ class Model3DManager {
             }
 
             // Rotación automática para que se vea
-            if (this.model) {
-                this.model.rotation.y += 0.005;
+            if (this.model && CONFIG.MODEL.AUTO_ROTATE) {
+                this.model.rotation.y += CONFIG.MODEL.ROTATE_SPEED;
             }
 
             // Renderizar cuando visible
