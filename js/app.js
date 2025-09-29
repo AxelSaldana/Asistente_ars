@@ -205,10 +205,11 @@ class SpeechManager {
             // Si no hay speechSynthesis, continuar sin voces
             if (!this.synthesis) {
                 console.warn('speechSynthesis no disponible. Continuando sin síntesis de voz.');
-                return resolve();
+                resolve();
+                return;
             }
 
-            const loadVoices = () => {
+            const pickVoice = () => {
                 try {
                     this.voices = this.synthesis.getVoices ? this.synthesis.getVoices() : [];
                 } catch (e) {
@@ -216,45 +217,53 @@ class SpeechManager {
                 }
 
                 if (this.voices && this.voices.length > 0) {
-                    const spanishVoices = this.voices.filter(voice => 
-                        voice.lang && (voice.lang.includes('es') || voice.lang.includes('ES'))
-                    );
-                    this.selectedVoice = spanishVoices.length > 0 ? spanishVoices[0] : this.voices[0];
+                    const spanishVoices = this.voices.filter(v => v.lang && (v.lang.includes('es') || v.lang.includes('ES')));
+                    const maleNameHints = /(Diego|Jorge|Enrique|Carlos|Ricardo|Pablo|Miguel|Francisco|Juan|Andrés|Jose|José|Manuel|Antonio|Male|Hombre)/i;
+                    const maleSpanish = spanishVoices.find(v => maleNameHints.test(v.name || ''));
+                    const maleAny = this.voices.find(v => maleNameHints.test(v.name || ''));
+
+                    if (maleSpanish) {
+                        this.selectedVoice = maleSpanish;
+                    } else if (spanishVoices.length > 0) {
+                        this.selectedVoice = spanishVoices[0];
+                    } else if (maleAny) {
+                        this.selectedVoice = maleAny;
+                    } else {
+                        this.selectedVoice = this.voices[0];
+                    }
                     resolve();
                 }
             };
 
-            // Intentar registrar evento de cambio de voces de forma segura
+            // Registrar evento de forma segura
             try {
                 if (typeof this.synthesis.addEventListener === 'function') {
-                    this.synthesis.addEventListener('voiceschanged', loadVoices);
+                    this.synthesis.addEventListener('voiceschanged', pickVoice);
                 } else if ('onvoiceschanged' in this.synthesis) {
-                    this.synthesis.onvoiceschanged = loadVoices;
+                    this.synthesis.onvoiceschanged = pickVoice;
                 } else if (typeof window !== 'undefined' && window.addEventListener) {
-                    // Algunas implementaciones disparan el evento en window
-                    window.addEventListener('voiceschanged', loadVoices);
+                    window.addEventListener('voiceschanged', pickVoice);
                 }
             } catch (e) {
-                // Ignorar errores aquí; continuaremos con reintentos y timeout
+                // Ignorar errores; usaremos reintentos
             }
 
-            // Llamada inicial inmediata
-            loadVoices();
+            // Intento inmediato
+            pickVoice();
 
-            // Reintentos progresivos por si las voces tardan en poblarse
+            // Reintentos con timeout por si las voces tardan en poblarse
             let attempts = 0;
-            const maxAttempts = 20; // ~2s si usamos 100ms
+            const maxAttempts = 20;
             const interval = setInterval(() => {
                 if (this.voices && this.voices.length > 0) {
                     clearInterval(interval);
-                    return; // resolve ya fue llamado en loadVoices
+                    return; // resolve ya fue llamado en pickVoice
                 }
                 attempts++;
-                loadVoices();
+                pickVoice();
                 if (attempts >= maxAttempts) {
                     clearInterval(interval);
-                    // Continuar sin voces específicas
-                    resolve();
+                    resolve(); // Continuar sin seleccionar una voz específica
                 }
             }, 100);
         });
@@ -265,7 +274,6 @@ class SpeechManager {
 
         return new Promise((resolve) => {
             this.stopSpeaking();
-
             let resolved = false;
             const timeout = setTimeout(() => {
                 if (!resolved) {
@@ -459,6 +467,16 @@ class Model3DManager {
         this.clock = new THREE.Clock();
         this.isVisible = false;
         this.modelLoaded = false;
+        // Controles
+        this._controls = {
+            isDragging: false,
+            lastX: 0,
+            lastY: 0,
+            rotateSpeed: 0.005,
+            moveSpeed: 0.2,
+            scaleMin: 0.1,
+            scaleMax: 10.0
+        };
     }
 
     async init() {
@@ -482,6 +500,8 @@ class Model3DManager {
                 console.warn('⚠️ No se pudo cargar tu modelo:', error);
                 this.createTemporaryModel();
             }
+            // Activar controles interactivos
+            this.enableControls();
             
             this.startRenderLoop();
             console.log('✅ Model 3D Manager listo');
@@ -734,10 +754,94 @@ class Model3DManager {
         console.log('🎬 Renderizado iniciado');
     }
 
+    // ===== Controles Interactivos =====
+    enableControls() {
+        if (!this.canvas) return;
+
+        // Rueda del ratón: escala
+        this._wheelHandler = (e) => {
+            if (!this.model) return;
+            const delta = -e.deltaY * 0.001;
+            const currentScale = this.model.scale.x || 1;
+            const next = THREE.MathUtils.clamp(currentScale * (1 + delta), this._controls.scaleMin, this._controls.scaleMax);
+            this.model.scale.setScalar(next);
+        };
+        this.canvas.addEventListener('wheel', this._wheelHandler, { passive: true });
+
+        // Arrastrar: rotar
+        this._pointerDown = (e) => {
+            this._controls.isDragging = true;
+            this._controls.lastX = e.clientX;
+            this._controls.lastY = e.clientY;
+        };
+        this._pointerMove = (e) => {
+            if (!this._controls.isDragging || !this.model) return;
+            const dx = e.clientX - this._controls.lastX;
+            const dy = e.clientY - this._controls.lastY;
+            this._controls.lastX = e.clientX;
+            this._controls.lastY = e.clientY;
+            this.model.rotation.y += dx * this._controls.rotateSpeed;
+            this.model.rotation.x += dy * this._controls.rotateSpeed;
+        };
+        this._pointerUp = () => { this._controls.isDragging = false; };
+        this.canvas.addEventListener('mousedown', this._pointerDown);
+        window.addEventListener('mousemove', this._pointerMove);
+        window.addEventListener('mouseup', this._pointerUp);
+
+        // Teclado: mover, rotar, escalar
+        this._keyHandler = (e) => {
+            if (!this.model) return;
+            const k = e.key.toLowerCase();
+            const m = this._controls.moveSpeed;
+            switch (k) {
+                case 'arrowleft':
+                case 'a':
+                    this.model.position.x -= m; break;
+                case 'arrowright':
+                case 'd':
+                    this.model.position.x += m; break;
+                case 'arrowup':
+                case 'w':
+                    this.model.position.z -= m; break;
+                case 'arrowdown':
+                case 's':
+                    this.model.position.z += m; break;
+                case 'r':
+                    this.model.position.y += m; break;
+                case 'f':
+                    this.model.position.y -= m; break;
+                case 'q':
+                    this.model.rotation.y -= 0.1; break;
+                case 'e':
+                    this.model.rotation.y += 0.1; break;
+                case '+':
+                case '=':
+                    this._scaleBy(1.1); break;
+                case '-':
+                case '_':
+                    this._scaleBy(0.9); break;
+            }
+        };
+        window.addEventListener('keydown', this._keyHandler);
+    }
+
+    _scaleBy(factor) {
+        if (!this.model) return;
+        const current = this.model.scale.x || 1;
+        const next = THREE.MathUtils.clamp(current * factor, this._controls.scaleMin, this._controls.scaleMax);
+        this.model.scale.setScalar(next);
+    }
+
     dispose() {
         if (this.renderer) {
             this.renderer.dispose();
         }
+        // Limpiar listeners de controles
+        if (this.canvas && this._wheelHandler) this.canvas.removeEventListener('wheel', this._wheelHandler);
+        if (this.canvas && this._pointerDown) this.canvas.removeEventListener('mousedown', this._pointerDown);
+        if (this._pointerMove) window.removeEventListener('mousemove', this._pointerMove);
+        if (this._pointerUp) window.removeEventListener('mouseup', this._pointerUp);
+        if (this._keyHandler) window.removeEventListener('keydown', this._keyHandler);
     }
 }
 
