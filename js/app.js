@@ -9,9 +9,10 @@ const CONFIG = {
         SCALE: 1.0,
         AUTO_ROTATE: false,
         ROTATE_SPEED: 0.005,
+        ANIMATION_SPEED: 1.4, // velocidad 20% más rápida
         ANIMATIONS: {
             IDLE: 'Animation',
-            TALKING: 'animation', 
+            TALKING: 'animation',
             THINKING: 'animation',
             LISTENING: 'animation'
         }
@@ -696,6 +697,9 @@ class Model3DManager {
 
         const action = this.animations[animationName.toLowerCase()];
         if (action) {
+            // Ajustar velocidad global de reproducción
+            const spd = (CONFIG && CONFIG.MODEL && typeof CONFIG.MODEL.ANIMATION_SPEED === 'number') ? CONFIG.MODEL.ANIMATION_SPEED : 1.0;
+            this.mixer.timeScale = Math.max(0.1, spd);
             if (this.currentAnimation && this.currentAnimation !== action) {
                 this.currentAnimation.fadeOut(0.3);
             }
@@ -771,7 +775,7 @@ class Model3DManager {
         // Mejorar soporte móvil: no permitir gestos del navegador
         try {
             this.canvas.style.touchAction = 'none'; // desactiva gestos por defecto (pinch/zoom del navegador)
-        } catch (_) {}
+        } catch (_) { }
 
         // Rueda del ratón: escala
         this._wheelHandler = (e) => {
@@ -995,10 +999,31 @@ class VirtualAssistantApp {
     async init() {
         try {
             console.log('🚀 Iniciando Asistente Virtual AR...');
+            // Mostrar el modelo en modo Preview antes de pedir permisos
+            await this.initPreviewModel();
+
             this.setupEventListeners();
             this.showPermissionModal();
         } catch (error) {
             console.error('❌ Error inicializando:', error);
+        }
+    }
+
+    async initPreviewModel() {
+        try {
+            if (!this.ui || !this.ui.model3dCanvas) return;
+            if (!this.model3dManager) {
+                this.model3dManager = new Model3DManager(this.ui.model3dCanvas);
+                await this.model3dManager.init();
+            }
+            this.isInPreview = true;
+            this.isInAR = false;
+            if (this.ui.camera) this.ui.camera.style.display = 'none';
+            this.model3dManager.setARMode(false);
+            this.model3dManager.setVisible(true);
+            console.log('✅ Preview inicial listo');
+        } catch (e) {
+            console.error('⚠️ No se pudo iniciar preview inicial:', e);
         }
     }
 
@@ -1048,16 +1073,19 @@ class VirtualAssistantApp {
                 throw new Error(reason);
             }
 
-            // 4. Modelo 3D
-            this.updatePermissionStatus('🎭 Cargando models/avatar_prueba.glb...');
-            this.model3dManager = new Model3DManager(this.ui.model3dCanvas);
-            await this.model3dManager.init();
+            // 4. Modelo 3D (reutilizar si ya está cargado para preview)
+            this.updatePermissionStatus('🎭 Preparando modelo 3D...');
+            if (!this.model3dManager) {
+                this.model3dManager = new Model3DManager(this.ui.model3dCanvas);
+                await this.model3dManager.init();
+            }
 
             // 5. Listo
             this.isInitialized = true;
             this.hidePermissionModal();
             this.hideLoadingScreen();
-            this.enterNormalMode();
+            // Dejar al usuario en Preview por defecto tras permisos
+            this.enterPreviewMode();
 
             console.log('🎉 ¡Sistema completo!');
 
