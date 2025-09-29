@@ -6,7 +6,7 @@
 const CONFIG = {
     MODEL: {
         PATH: 'models/avatar_prueba.glb', // ← RUTA DIRECTA
-        SCALE: 3,
+        SCALE: 2,
         AUTO_ROTATE: false,
         ROTATE_SPEED: 0.005,
         ANIMATION_SPEED: 2, // velocidad 20% más rápida
@@ -173,6 +173,15 @@ class SpeechManager {
                 return false;
             }
 
+            // Solicitar permiso de micrófono explícito en móvil (algunos navegadores lo requieren antes)
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+            } catch (e) {
+                // Si falla, continuamos: SpeechRecognition podría aún pedir permiso al iniciar
+                console.warn('🎤 Permiso de micrófono (getUserMedia) falló o fue denegado inicialmente:', e?.name || e);
+            }
+
             this.setupSpeechRecognition();
             await this.setupSpeechSynthesis();
 
@@ -182,148 +191,6 @@ class SpeechManager {
             this.unsupportedReason = 'No se pudo inicializar la voz: ' + (error?.message || 'desconocido');
             return false;
         }
-    }
-
-    setupSpeechRecognition() {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        this.recognition = new SpeechRecognition();
-
-        this.recognition.continuous = false;
-        this.recognition.interimResults = false;
-        this.recognition.lang = CONFIG.SPEECH.LANGUAGE;
-        this.recognition.maxAlternatives = 1;
-
-        this.recognition.onstart = () => this.isListening = true;
-        this.recognition.onend = () => this.isListening = false;
-        this.recognition.onerror = (e) => {
-            this.isListening = false;
-            this.lastError = e && e.error ? e.error : 'unknown_error';
-            console.warn('SpeechRecognition error:', this.lastError);
-        };
-    }
-
-    async setupSpeechSynthesis() {
-        return new Promise((resolve) => {
-            // Si no hay speechSynthesis, continuar sin voces
-            if (!this.synthesis) {
-                console.warn('speechSynthesis no disponible. Continuando sin síntesis de voz.');
-                resolve();
-                return;
-            }
-
-            const pickVoice = () => {
-                try {
-                    this.voices = this.synthesis.getVoices ? this.synthesis.getVoices() : [];
-                } catch (e) {
-                    this.voices = [];
-                }
-
-                if (this.voices && this.voices.length > 0) {
-                    const spanishVoices = this.voices.filter(v => v.lang && (v.lang.includes('es') || v.lang.includes('ES')));
-                    const maleNameHints = /(Diego|Jorge|Enrique|Carlos|Ricardo|Pablo|Miguel|Francisco|Juan|Andrés|Jose|José|Manuel|Antonio|Male|Hombre)/i;
-                    const maleSpanish = spanishVoices.find(v => maleNameHints.test(v.name || ''));
-                    const maleAny = this.voices.find(v => maleNameHints.test(v.name || ''));
-
-                    if (maleSpanish) {
-                        this.selectedVoice = maleSpanish;
-                    } else if (spanishVoices.length > 0) {
-                        this.selectedVoice = spanishVoices[0];
-                    } else if (maleAny) {
-                        this.selectedVoice = maleAny;
-                    } else {
-                        this.selectedVoice = this.voices[0];
-                    }
-                    resolve();
-                }
-            };
-
-            // Registrar evento de forma segura
-            try {
-                if (typeof this.synthesis.addEventListener === 'function') {
-                    this.synthesis.addEventListener('voiceschanged', pickVoice);
-                } else if ('onvoiceschanged' in this.synthesis) {
-                    this.synthesis.onvoiceschanged = pickVoice;
-                } else if (typeof window !== 'undefined' && window.addEventListener) {
-                    window.addEventListener('voiceschanged', pickVoice);
-                }
-            } catch (e) {
-                // Ignorar errores; usaremos reintentos
-            }
-
-            // Intento inmediato
-            pickVoice();
-
-            // Reintentos con timeout por si las voces tardan en poblarse
-            let attempts = 0;
-            const maxAttempts = 20;
-            const interval = setInterval(() => {
-                if (this.voices && this.voices.length > 0) {
-                    clearInterval(interval);
-                    return; // resolve ya fue llamado en pickVoice
-                }
-                attempts++;
-                pickVoice();
-                if (attempts >= maxAttempts) {
-                    clearInterval(interval);
-                    resolve(); // Continuar sin seleccionar una voz específica
-                }
-            }, 100);
-        });
-    }
-
-    async listen() {
-        if (!this.recognition || this.isListening) return null;
-
-        return new Promise((resolve) => {
-            this.stopSpeaking();
-            let resolved = false;
-            const timeout = setTimeout(() => {
-                if (!resolved) {
-                    resolved = true;
-                    try { this.recognition.stop(); } catch (e) { }
-                    resolve(null);
-                }
-            }, CONFIG.SPEECH.RECOGNITION_TIMEOUT);
-
-            this.recognition.onresult = (event) => {
-                if (resolved) return;
-                resolved = true;
-                clearTimeout(timeout);
-
-                if (event.results.length > 0) {
-                    const transcript = event.results[0][0].transcript;
-                    resolve(transcript.trim());
-                } else {
-                    resolve(null);
-                }
-            };
-
-            this.recognition.onerror = () => {
-                if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    resolve(null);
-                }
-            };
-
-            this.recognition.onend = () => {
-                if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    resolve(null);
-                }
-            };
-
-            try {
-                this.recognition.start();
-            } catch (error) {
-                if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    resolve(null);
-                }
-            }
-        });
     }
 
     async speak(text) {
