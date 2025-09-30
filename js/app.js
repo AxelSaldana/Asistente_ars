@@ -1642,6 +1642,17 @@ class VirtualAssistantApp {
 
         if (this.ui.arSendBtn) this.ui.arSendBtn.addEventListener('click', () => this.sendARMessage());
         if (this.ui.arCloseBtn) this.ui.arCloseBtn.addEventListener('click', () => this.toggleAR());
+        const relocateBtn = document.getElementById('arRelocateBtn');
+        if (relocateBtn) relocateBtn.addEventListener('click', () => {
+            if (!this.model3dManager) return;
+            // Permitir recolocar: mostrar retícula y permitir tap de nuevo
+            this.model3dManager.hasPlaced = false;
+            if (this.model3dManager.reticle) this.model3dManager.reticle.visible = true;
+            // Hint en UI
+            if (this.ui && this.ui.arResponse) {
+                this.ui.arResponse.innerHTML = '<div style="color:#00ff88">Recoloca: mueve el teléfono para encontrar una superficie o toca para colocar al frente.</div>';
+            }
+        });
         if (this.ui.arMicBtn) this.ui.arMicBtn.addEventListener('click', () => this.startVoiceInteraction(true));
 
         if (this.ui.userInput) {
