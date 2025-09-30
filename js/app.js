@@ -819,15 +819,23 @@ class Model3DManager {
                             this.xrAnchorSpace = anchor.anchorSpace;
                             this.hasPlaced = true;
                             if (this.reticle) this.reticle.visible = false;
+                            // Deshabilitar matrixAutoUpdate para que el anchor controle la posición
+                            if (this.model) this.model.matrixAutoUpdate = false;
                             console.log('📌 Modelo anclado con XRAnchor');
                             // Aviso UI
                             try { this.canvas?.dispatchEvent(new CustomEvent('xr-anchored')); } catch (_) {}
                         }).catch((e) => {
                             console.warn('No se pudo crear anchor, usando posición de retícula:', e);
                             if (this.model && this.reticle) {
-                                this.model.position.setFromMatrixPosition(this.reticle.matrix);
+                                // Guardar la pose completa de la retícula
+                                this.model.matrix.copy(this.reticle.matrix);
+                                this.model.matrix.decompose(this.model.position, this.model.quaternion, this.model.scale);
+                                // Deshabilitar updates automáticos para mantener fijo
+                                this.model.matrixAutoUpdate = false;
+                                this.model.updateMatrix();
                                 this.hasPlaced = true;
                                 if (this.reticle) this.reticle.visible = false;
+                                console.log('📌 Modelo fijado en AR (sin anchor) en:', this.model.position);
                                 try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-no-anchor')); } catch (_) {}
                             }
                         });
@@ -836,9 +844,15 @@ class Model3DManager {
 
                     // Si no tenemos hit anclable pero sí retícula visible, colocar en esa pose
                     if (this.model && this.reticle && this.reticle.visible) {
-                        this.model.position.setFromMatrixPosition(this.reticle.matrix);
+                        // Guardar la pose completa de la retícula
+                        this.model.matrix.copy(this.reticle.matrix);
+                        this.model.matrix.decompose(this.model.position, this.model.quaternion, this.model.scale);
+                        // Deshabilitar updates automáticos para mantener fijo
+                        this.model.matrixAutoUpdate = false;
+                        this.model.updateMatrix();
                         this.hasPlaced = true;
-                        console.log('📌 Modelo fijado en AR (hit-test sin anchor)');
+                        if (this.reticle) this.reticle.visible = false;
+                        console.log('📌 Modelo fijado en AR (hit-test sin anchor) en:', this.model.position);
                         return;
                     }
 
@@ -851,8 +865,11 @@ class Model3DManager {
                             const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(new THREE.Matrix4().extractRotation(m));
                             const fallbackPos = pos.clone().add(dir.multiplyScalar(1.5));
                             this.model.position.copy(fallbackPos);
+                            // Deshabilitar updates automáticos para mantener fijo
+                            this.model.matrixAutoUpdate = false;
+                            this.model.updateMatrix();
                             this.hasPlaced = true;
-                            console.log('📌 Modelo fijado en AR (fallback sin plano)');
+                            console.log('📌 Modelo fijado en AR (fallback sin plano) en:', fallbackPos);
                             try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-fallback')); } catch (_) {}
                         }
                     }
@@ -902,11 +919,17 @@ class Model3DManager {
             this.xrRefSpace = null;
             this.xrViewerSpace = null;
             this.xrHitTestSource = null;
+            this.xrAnchor = null;
+            this.xrAnchorSpace = null;
             this._onXRSelect = null;
             // Return to normal RAF loop
             if (this.renderer) this.renderer.setAnimationLoop(null);
             if (this.reticle) this.reticle.visible = false;
             this.hasPlaced = false;
+            // Restaurar matrixAutoUpdate para modo preview
+            if (this.model) {
+                this.model.matrixAutoUpdate = true;
+            }
         }
     }
 
@@ -966,15 +989,16 @@ class Model3DManager {
         }
 
         // If anchored, update model pose from anchor space to keep it fixed in the real world
-        if (this.xrAnchorSpace) {
+        if (this.xrAnchorSpace && this.hasPlaced) {
             const anchorPose = frame.getPose(this.xrAnchorSpace, this.xrRefSpace);
             if (anchorPose && this.model) {
                 const m = new THREE.Matrix4().fromArray(anchorPose.transform.matrix);
-                this.model.matrixAutoUpdate = false;
                 this.model.matrix.copy(m);
-                this.model.matrix.decompose(this.model.position, this.model.quaternion, this.model.scale);
+                // NO descomponemos ni actualizamos position/rotation/scale individualmente
+                // para evitar conflictos con las transformaciones manuales
             }
         }
+        // Si está colocado sin anchor, mantener la matriz fija (no hacer nada, matrixAutoUpdate=false)
 
         // Animate and render
         const deltaTime = this.clock.getDelta();
