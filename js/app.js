@@ -562,7 +562,13 @@ class Model3DManager {
                     resolve();
                 },
                 (progress) => {
-                    const percent = Math.round((progress.loaded / progress.total) * 100);
+                    let percent = 0;
+                    if (progress && typeof progress.total === 'number' && progress.total > 0) {
+                        percent = Math.round((progress.loaded / progress.total) * 100);
+                    } else if (progress && typeof progress.loaded === 'number') {
+                        // fallback cuando no hay total
+                        percent = Math.min(99, Math.round((progress.loaded / (1024 * 1024)) * 10));
+                    }
                     console.log(`📥 Cargando tu modelo: ${percent}%`);
                 },
                 (error) => {
@@ -961,6 +967,11 @@ class Model3DManager {
 
     handleResize() {
         if (!this.camera || !this.renderer) return;
+        // Evitar cambiar tamaño mientras una sesión XR está presentando
+        if (this.renderer.xr && this.renderer.xr.isPresenting) {
+            // WebXR gestiona el viewport; ignorar este resize
+            return;
+        }
 
         const width = window.innerWidth;
         const height = window.innerHeight;
