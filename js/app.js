@@ -430,6 +430,14 @@ class Model3DManager {
         this.isVisible = false;
         this.modelLoaded = false;
         this.defaultScale = (CONFIG && CONFIG.MODEL && CONFIG.MODEL.SCALE) ? CONFIG.MODEL.SCALE : 1.0;
+        // WebXR state
+        this.xrSession = null;
+        this.xrRefSpace = null;        // 'local' reference space
+        this.xrViewerSpace = null;     // 'viewer' reference for hit-test source
+        this.xrHitTestSource = null;
+        this.reticle = null;           // visual reticle for hit pose
+        this.hasPlaced = false;        // whether the avatar is locked in place
+        this._onXRFrameBound = null;   // cached bound frame callback
         // Controles
         this._controls = {
             isDragging: false,
@@ -598,6 +606,10 @@ class Model3DManager {
         this.renderer.outputEncoding = THREE.sRGBEncoding;
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        // Enable WebXR rendering (AR)
+        if (this.renderer && this.renderer.xr) {
+            this.renderer.xr.enabled = true;
+        }
     }
 
     setupScene() {
@@ -690,6 +702,122 @@ class Model3DManager {
             this.scene.background = new THREE.Color(0x87CEEB);
             this.renderer.setClearColor(0x87CEEB, 1);
         }
+    }
+
+    // ===== WebXR AR Session with Hit-Test =====
+    async startARSession() {
+        try {
+            if (!navigator.xr || !this.renderer || !this.renderer.xr) {
+                console.warn('WebXR no disponible');
+                return false;
+            }
+
+            const supported = await navigator.xr.isSessionSupported?.('immersive-ar');
+            if (!supported) {
+                console.warn('Sesión immersive-ar no soportada');
+                return false;
+            }
+
+            // Request AR session
+            this.xrSession = await navigator.xr.requestSession('immersive-ar', {
+                requiredFeatures: ['hit-test'],
+                optionalFeatures: ['local-floor', 'bounded-floor', 'dom-overlay'],
+                domOverlay: { root: document.body }
+            });
+
+            // Set session to renderer
+            this.renderer.xr.setSession(this.xrSession);
+
+            // Reference spaces
+            this.xrRefSpace = await this.xrSession.requestReferenceSpace('local');
+            this.xrViewerSpace = await this.xrSession.requestReferenceSpace('viewer');
+
+            // Create hit-test source
+            const hitTestSource = await this.xrSession.requestHitTestSource({ space: this.xrViewerSpace });
+            this.xrHitTestSource = hitTestSource;
+
+            // Create reticle if not exists
+            if (!this.reticle) this.createReticle();
+            this.reticle.visible = false;
+            this.hasPlaced = false;
+
+            // Input: place model on select when reticle visible
+            this._onXRSelect = () => {
+                if (this.reticle && this.reticle.visible && this.model) {
+                    // Position model at reticle
+                    this.model.position.setFromMatrixPosition(this.reticle.matrix);
+                    this.model.position.y = 0; // keep on floor (optional)
+                    this.hasPlaced = true;
+                    console.log('📌 Modelo fijado en AR');
+                }
+            };
+            this.xrSession.addEventListener('select', this._onXRSelect);
+
+            // Animation loop for XR frames
+            this._onXRFrameBound = (time, frame) => this._onXRFrame(time, frame);
+            this.renderer.setAnimationLoop(this._onXRFrameBound);
+
+            return true;
+        } catch (err) {
+            console.error('❌ startARSession error:', err);
+            return false;
+        }
+    }
+
+    async stopARSession() {
+        try {
+            if (this.xrSession) {
+                if (this._onXRSelect) {
+                    try { this.xrSession.removeEventListener('select', this._onXRSelect); } catch (_) {}
+                }
+                await this.xrSession.end();
+            }
+        } catch (e) {
+            console.warn('stopARSession warning:', e);
+        } finally {
+            this.xrSession = null;
+            this.xrRefSpace = null;
+            this.xrViewerSpace = null;
+            this.xrHitTestSource = null;
+            this._onXRSelect = null;
+            // Return to normal RAF loop
+            if (this.renderer) this.renderer.setAnimationLoop(null);
+            if (this.reticle) this.reticle.visible = false;
+            this.hasPlaced = false;
+        }
+    }
+
+    _onXRFrame(time, frame) {
+        if (!frame || !this.renderer || !this.scene || !this.camera) return;
+
+        const session = frame.session;
+        // Update hit-test
+        if (this.xrHitTestSource && this.xrRefSpace) {
+            const results = frame.getHitTestResults(this.xrHitTestSource);
+            if (results && results.length > 0) {
+                const pose = results[0].getPose(this.xrRefSpace);
+                if (pose && this.reticle) {
+                    this.reticle.visible = !this.hasPlaced; // hide reticle after placement
+                    this.reticle.matrix.fromArray(pose.transform.matrix);
+                }
+            } else if (this.reticle) {
+                this.reticle.visible = false && !this.hasPlaced;
+            }
+        }
+
+        // Animate and render
+        const deltaTime = this.clock.getDelta();
+        if (this.mixer && this.modelLoaded) this.mixer.update(deltaTime);
+        if (this.isVisible) this.renderer.render(this.scene, this.camera);
+    }
+
+    createReticle() {
+        const geo = new THREE.RingGeometry(0.12, 0.15, 32).rotateX(-Math.PI / 2);
+        const mat = new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide });
+        this.reticle = new THREE.Mesh(geo, mat);
+        this.reticle.matrixAutoUpdate = false;
+        this.reticle.visible = false;
+        this.scene.add(this.reticle);
     }
 
     enableTapPlacement(enable = true) {
@@ -1254,13 +1382,29 @@ class VirtualAssistantApp {
         this.isInAR = true;
         this.isInPreview = false;
 
-        if (this.ui.camera) this.ui.camera.style.display = 'block';
-        if (this.model3dManager) {
-            this.model3dManager.setVisible(true);
-            this.model3dManager.setARMode(true);
-            // Habilitar tap-to-place en AR
-            this.model3dManager.enableTapPlacement(true);
-        }
+        const startXR = async () => {
+            let xrOk = false;
+            if (this.model3dManager) {
+                this.model3dManager.setVisible(true);
+                this.model3dManager.setARMode(true);
+                xrOk = await this.model3dManager.startARSession();
+            }
+
+            if (xrOk) {
+                // WebXR usa video passthrough; escondemos la cámara HTML
+                if (this.ui.camera) this.ui.camera.style.display = 'none';
+                // Desactivar el tap-placement legacy para AR XR
+                if (this.model3dManager) this.model3dManager.enableTapPlacement(false);
+            } else {
+                // Fallback: pseudo-AR con cámara HTML y raycast al plano Y=0
+                if (this.ui.camera) this.ui.camera.style.display = 'block';
+                if (this.model3dManager) {
+                    this.model3dManager.setVisible(true);
+                    this.model3dManager.enableTapPlacement(true);
+                }
+            }
+        };
+        startXR();
 
         if (this.ui.mainControls) this.ui.mainControls.style.display = 'none';
         if (this.ui.chatModal) this.ui.chatModal.style.display = 'none';
@@ -1293,6 +1437,10 @@ class VirtualAssistantApp {
             this.model3dManager.enableTapPlacement(false);
             // Restablecer pose y escala en Preview
             this.model3dManager.resetForPreview();
+            // Parar sesión XR si estaba activa
+            if (this.model3dManager.xrSession) {
+                this.model3dManager.stopARSession();
+            }
         }
     }
 
