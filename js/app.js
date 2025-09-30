@@ -719,9 +719,11 @@ class Model3DManager {
             }
 
             // Request AR session
+            console.log('🕶️ Solicitando sesión WebXR immersive-ar...');
+            this.renderer.xr.setReferenceSpaceType?.('local');
             this.xrSession = await navigator.xr.requestSession('immersive-ar', {
-                requiredFeatures: ['hit-test'],
-                optionalFeatures: ['local-floor', 'bounded-floor', 'dom-overlay'],
+                requiredFeatures: ['hit-test', 'dom-overlay'],
+                optionalFeatures: ['local-floor', 'bounded-floor', 'unbounded', 'light-estimation'],
                 domOverlay: { root: document.body }
             });
 
@@ -731,6 +733,13 @@ class Model3DManager {
             // Reference spaces
             this.xrRefSpace = await this.xrSession.requestReferenceSpace('local');
             this.xrViewerSpace = await this.xrSession.requestReferenceSpace('viewer');
+
+            console.log('✅ Sesión WebXR iniciada. environmentBlendMode =', this.xrSession.environmentBlendMode);
+            if (this.xrSession.environmentBlendMode && this.xrSession.environmentBlendMode === 'opaque') {
+                console.warn('El modo de mezcla es "opaque" (no hay passthrough de cámara). Se usará el fallback.');
+                try { await this.stopARSession(); } catch (_) {}
+                return false;
+            }
 
             // Create hit-test source
             const hitTestSource = await this.xrSession.requestHitTestSource({ space: this.xrViewerSpace });
@@ -752,6 +761,7 @@ class Model3DManager {
                 }
             };
             this.xrSession.addEventListener('select', this._onXRSelect);
+            this.xrSession.addEventListener('end', () => console.log('🛑 XRSession end'));
 
             // Animation loop for XR frames
             this._onXRFrameBound = (time, frame) => this._onXRFrame(time, frame);
