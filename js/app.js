@@ -29,6 +29,10 @@ const CONFIG = {
         VOICE_PITCH: 1.0,
         VOICE_VOLUME: 1.0,
         RECOGNITION_TIMEOUT: 15000
+    },
+    AR: {
+        // Si es true, saltar WebXR y usar cámara HTML + tap-to-place siempre
+        FORCE_FALLBACK: false
     }
 };
 
@@ -1457,6 +1461,19 @@ class VirtualAssistantApp {
         this.isInPreview = false;
 
         const startXR = async () => {
+            // Force fallback path if configured
+            if (CONFIG && CONFIG.AR && CONFIG.AR.FORCE_FALLBACK) {
+                console.warn('⚙️ FORCE_FALLBACK activo: usando cámara HTML.');
+                if (this.ui.camera) this.ui.camera.style.display = 'block';
+                if (this.model3dManager) {
+                    this.model3dManager.setVisible(true);
+                    this.model3dManager.setARMode(false);
+                    this.model3dManager.enableTapPlacement(true);
+                }
+                if (this.ui.arStatus) this.ui.arStatus.textContent = 'Fallback AR (cámara HTML)';
+                return;
+            }
+
             let xrOk = false;
             if (this.model3dManager) {
                 this.model3dManager.setVisible(true);
@@ -1469,6 +1486,7 @@ class VirtualAssistantApp {
                 if (this.ui.camera) this.ui.camera.style.display = 'none';
                 // Desactivar el tap-placement legacy para AR XR
                 if (this.model3dManager) this.model3dManager.enableTapPlacement(false);
+                if (this.ui.arStatus) this.ui.arStatus.textContent = 'WebXR AR activo';
 
                 // Fallback automático si no hay hits en 6s
                 setTimeout(async () => {
@@ -1490,6 +1508,7 @@ class VirtualAssistantApp {
                     this.model3dManager.setVisible(true);
                     this.model3dManager.enableTapPlacement(true);
                 }
+                if (this.ui.arStatus) this.ui.arStatus.textContent = 'Fallback AR (cámara HTML)';
             }
         };
         startXR();
