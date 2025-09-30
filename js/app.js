@@ -761,8 +761,17 @@ class Model3DManager {
                 return false;
             }
 
-            // Create hit-test source
-            const hitTestSource = await this.xrSession.requestHitTestSource({ space: this.xrViewerSpace });
+            // Create hit-test source from viewer forward ray (more reliable on some devices)
+            let hitTestSource = null;
+            try {
+                hitTestSource = await this.xrSession.requestHitTestSource({
+                    space: this.xrViewerSpace,
+                    offsetRay: new XRRay() // forward from viewer
+                });
+            } catch (e) {
+                console.warn('requestHitTestSource with offsetRay falló, probando sin offsetRay:', e);
+                hitTestSource = await this.xrSession.requestHitTestSource({ space: this.xrViewerSpace });
+            }
             this.xrHitTestSource = hitTestSource;
 
             // Create reticle if not exists
@@ -835,7 +844,22 @@ class Model3DManager {
                     this._xrHits++;
                 }
             } else if (this.reticle) {
-                this.reticle.visible = false && !this.hasPlaced;
+                // If no hits, try to place reticle 1.5m in front of the camera for visual confirmation
+                const viewerPose = frame.getViewerPose(this.xrRefSpace);
+                if (viewerPose && !this.hasPlaced) {
+                    const view = viewerPose.views[0];
+                    if (view) {
+                        const m = new THREE.Matrix4().fromArray(view.transform.matrix);
+                        const pos = new THREE.Vector3().setFromMatrixPosition(m);
+                        const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(new THREE.Matrix4().extractRotation(m));
+                        const fallbackPos = pos.clone().add(dir.multiplyScalar(1.5));
+                        this.reticle.visible = true;
+                        this.reticle.matrix.identity();
+                        this.reticle.matrix.setPosition(fallbackPos);
+                    }
+                } else {
+                    this.reticle.visible = false && !this.hasPlaced;
+                }
             }
         }
 
@@ -1445,6 +1469,20 @@ class VirtualAssistantApp {
                 if (this.ui.camera) this.ui.camera.style.display = 'none';
                 // Desactivar el tap-placement legacy para AR XR
                 if (this.model3dManager) this.model3dManager.enableTapPlacement(false);
+
+                // Fallback automático si no hay hits en 6s
+                setTimeout(async () => {
+                    try {
+                        if (!this.isInAR) return;
+                        if (!this.model3dManager || !this.model3dManager.xrSession) return;
+                        if (typeof this.model3dManager._xrHits === 'number' && this.model3dManager._xrHits === 0) {
+                            console.warn('↩️ Fallback: sin hit-test en tiempo. Volviendo a cámara HTML.');
+                            await this.model3dManager.stopARSession();
+                            if (this.ui.camera) this.ui.camera.style.display = 'block';
+                            this.model3dManager.enableTapPlacement(true);
+                        }
+                    } catch (_) {}
+                }, 6000);
             } else {
                 // Fallback: pseudo-AR con cámara HTML y raycast al plano Y=0
                 if (this.ui.camera) this.ui.camera.style.display = 'block';
