@@ -1695,6 +1695,9 @@ class VirtualAssistantApp {
             if (!this.model3dManager) return;
             // Permitir recolocar: mostrar retícula y permitir tap de nuevo
             this.model3dManager.hasPlaced = false;
+            // Limpiar anchor activo para permitir nueva fijación
+            this.model3dManager.xrAnchor = null;
+            this.model3dManager.xrAnchorSpace = null;
             if (this.model3dManager.reticle) this.model3dManager.reticle.visible = true;
             // Hint en UI
             if (this.ui && this.ui.arResponse) {
@@ -1710,12 +1713,35 @@ class VirtualAssistantApp {
                 if (this.ui.arStatus) {
                     this.ui.arStatus.classList.remove('hidden');
                     this.ui.arStatus.textContent = 'Sin plano: toca para colocar al frente o mueve el teléfono';
+                    setTimeout(() => this.ui.arStatus && this.ui.arStatus.classList.add('hidden'), 3000);
                 }
             });
             c.addEventListener('xr-plane-detected', () => {
                 if (this.ui.arStatus) {
                     this.ui.arStatus.classList.remove('hidden');
                     this.ui.arStatus.textContent = 'Plano detectado: toca para fijar el avatar';
+                    setTimeout(() => this.ui.arStatus && this.ui.arStatus.classList.add('hidden'), 3000);
+                }
+            });
+            c.addEventListener('xr-anchored', () => {
+                if (this.ui.arStatus) {
+                    this.ui.arStatus.classList.remove('hidden');
+                    this.ui.arStatus.textContent = 'Anclado al mundo ✅';
+                    setTimeout(() => this.ui.arStatus && this.ui.arStatus.classList.add('hidden'), 3000);
+                }
+            });
+            c.addEventListener('xr-placed-no-anchor', () => {
+                if (this.ui.arStatus) {
+                    this.ui.arStatus.classList.remove('hidden');
+                    this.ui.arStatus.textContent = 'Colocado (sin anchor). Puedes Recolocar cuando detecte plano';
+                    setTimeout(() => this.ui.arStatus && this.ui.arStatus.classList.add('hidden'), 3000);
+                }
+            });
+            c.addEventListener('xr-placed-fallback', () => {
+                if (this.ui.arStatus) {
+                    this.ui.arStatus.classList.remove('hidden');
+                    this.ui.arStatus.textContent = 'Colocado al frente. Usa Recolocar para anclar';
+                    setTimeout(() => this.ui.arStatus && this.ui.arStatus.classList.add('hidden'), 3000);
                 }
             });
         }
