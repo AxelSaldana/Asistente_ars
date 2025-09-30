@@ -734,7 +734,7 @@ class Model3DManager {
     }
 
     // ===== WebXR AR Session with Hit-Test =====
-    async startARSession() {
+    async startARSession(useDomOverlay = true) {
         try {
             if (!navigator.xr || !this.renderer || !this.renderer.xr) {
                 console.warn('WebXR no disponible');
@@ -750,11 +750,15 @@ class Model3DManager {
             // Request AR session
             console.log('🕶️ Solicitando sesión WebXR immersive-ar...');
             this.renderer.xr.setReferenceSpaceType?.('local');
-            this.xrSession = await navigator.xr.requestSession('immersive-ar', {
-                requiredFeatures: ['hit-test', 'dom-overlay'],
-                optionalFeatures: ['local-floor', 'bounded-floor', 'unbounded', 'light-estimation', 'anchors'],
-                domOverlay: { root: document.body }
-            });
+            const sessionInit = {
+                requiredFeatures: ['hit-test'],
+                optionalFeatures: ['local-floor', 'bounded-floor', 'unbounded', 'light-estimation', 'anchors']
+            };
+            if (useDomOverlay) {
+                sessionInit.optionalFeatures.push('dom-overlay');
+                sessionInit.domOverlay = { root: document.body };
+            }
+            this.xrSession = await navigator.xr.requestSession('immersive-ar', sessionInit);
 
             // Set session to renderer
             this.renderer.xr.setSession(this.xrSession);
@@ -862,6 +866,19 @@ class Model3DManager {
             // Animation loop for XR frames
             this._onXRFrameBound = (time, frame) => this._onXRFrame(time, frame);
             this.renderer.setAnimationLoop(this._onXRFrameBound);
+
+            // Si no hay frames después de 1.5s, reintentar sin domOverlay una sola vez
+            if (useDomOverlay) {
+                setTimeout(async () => {
+                    try {
+                        if (this._xrFrames === 0 && this.xrSession) {
+                            console.warn('⚠️ Sin frames XR con domOverlay. Reintentando sin domOverlay...');
+                            await this.stopARSession();
+                            await this.startARSession(false);
+                        }
+                    } catch (e) { console.warn('Retry sin domOverlay falló:', e); }
+                }, 1500);
+            }
 
             return true;
         } catch (err) {
