@@ -438,6 +438,9 @@ class Model3DManager {
         this.reticle = null;           // visual reticle for hit pose
         this.hasPlaced = false;        // whether the avatar is locked in place
         this._onXRFrameBound = null;   // cached bound frame callback
+        this._xrFrames = 0;            // frames counted in XR
+        this._xrHits = 0;              // number of hit-test results observed
+        this._xrStartTs = 0;           // session start timestamp
         // Controles
         this._controls = {
             isDragging: false,
@@ -616,6 +619,8 @@ class Model3DManager {
         if (this.renderer && this.renderer.xr) {
             this.renderer.xr.enabled = true;
         }
+        // Ensure full transparency in AR
+        try { this.renderer.domElement.style.backgroundColor = 'transparent'; } catch (_) {}
     }
 
     setupScene() {
@@ -704,9 +709,18 @@ class Model3DManager {
         if (isAR) {
             this.scene.background = null;
             this.renderer.setClearColor(0x000000, 0);
+            // Ensure canvas covers screen in AR
+            if (this.canvas && this.canvas.style) {
+                this.canvas.style.width = '100vw';
+                this.canvas.style.height = '100vh';
+            }
         } else {
             this.scene.background = new THREE.Color(0x87CEEB);
             this.renderer.setClearColor(0x87CEEB, 1);
+            if (this.canvas && this.canvas.style) {
+                this.canvas.style.width = '';
+                this.canvas.style.height = '';
+            }
         }
     }
 
@@ -755,6 +769,9 @@ class Model3DManager {
             if (!this.reticle) this.createReticle();
             this.reticle.visible = false;
             this.hasPlaced = false;
+            this._xrFrames = 0;
+            this._xrHits = 0;
+            this._xrStartTs = performance.now ? performance.now() : Date.now();
 
             // Input: place model on select when reticle visible
             this._onXRSelect = () => {
@@ -815,6 +832,7 @@ class Model3DManager {
                 if (pose && this.reticle) {
                     this.reticle.visible = !this.hasPlaced; // hide reticle after placement
                     this.reticle.matrix.fromArray(pose.transform.matrix);
+                    this._xrHits++;
                 }
             } else if (this.reticle) {
                 this.reticle.visible = false && !this.hasPlaced;
@@ -825,6 +843,16 @@ class Model3DManager {
         const deltaTime = this.clock.getDelta();
         if (this.mixer && this.modelLoaded) this.mixer.update(deltaTime);
         if (this.isVisible) this.renderer.render(this.scene, this.camera);
+
+        // Diagnostics: count frames and optionally fallback after 5s without hits
+        this._xrFrames++;
+        if (this._xrStartTs && ((performance.now ? performance.now() : Date.now()) - this._xrStartTs) > 5000) {
+            if (this._xrHits === 0) {
+                console.warn('⏳ Sin resultados de hit-test en 5s. Considera fallback o mejora iluminación/superficie.');
+            }
+            // Only report once
+            this._xrStartTs = 0;
+        }
     }
 
     createReticle() {
@@ -997,7 +1025,8 @@ class Model3DManager {
             }
 
             // Renderizar cuando visible
-            if (this.isVisible && this.renderer && this.scene && this.camera) {
+            // Evitar render doble: si XR está presentando, el render lo maneja setAnimationLoop
+            if (this.isVisible && this.renderer && this.scene && this.camera && !(this.renderer.xr && this.renderer.xr.isPresenting)) {
                 this.renderer.render(this.scene, this.camera);
             }
         };
