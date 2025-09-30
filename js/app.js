@@ -445,6 +445,7 @@ class Model3DManager {
         this._xrFrames = 0;            // frames counted in XR
         this._xrHits = 0;              // number of hit-test results observed
         this._xrStartTs = 0;           // session start timestamp
+        this._lastXRFrame = null;      // last XRFrame for select fallback
         // Controles
         this._controls = {
             isDragging: false,
@@ -754,8 +755,12 @@ class Model3DManager {
             // Set session to renderer
             this.renderer.xr.setSession(this.xrSession);
 
-            // Reference spaces
-            this.xrRefSpace = await this.xrSession.requestReferenceSpace('local');
+            // Reference spaces (prefer local-floor if available)
+            try {
+                this.xrRefSpace = await this.xrSession.requestReferenceSpace('local-floor');
+            } catch (_) {
+                this.xrRefSpace = await this.xrSession.requestReferenceSpace('local');
+            }
             this.xrViewerSpace = await this.xrSession.requestReferenceSpace('viewer');
 
             console.log('✅ Sesión WebXR iniciada. environmentBlendMode =', this.xrSession.environmentBlendMode);
@@ -778,6 +783,14 @@ class Model3DManager {
             }
             this.xrHitTestSource = hitTestSource;
 
+            // Transient input hit-test (for screen taps)
+            try {
+                this.xrTransientHitTestSource = await this.xrSession.requestHitTestSourceForTransientInput({ profile: 'generic-touchscreen' });
+            } catch (e) {
+                console.warn('requestHitTestSourceForTransientInput no disponible:', e);
+                this.xrTransientHitTestSource = null;
+            }
+
             // Create reticle if not exists
             if (!this.reticle) this.createReticle();
             this.reticle.visible = false;
@@ -786,14 +799,34 @@ class Model3DManager {
             this._xrHits = 0;
             this._xrStartTs = performance.now ? performance.now() : Date.now();
 
-            // Input: place model on select when reticle visible
-            this._onXRSelect = () => {
-                if (this.reticle && this.reticle.visible && this.model) {
-                    // Position model at reticle
-                    this.model.position.setFromMatrixPosition(this.reticle.matrix);
-                    this.model.position.y = 0; // keep on floor (optional)
-                    this.hasPlaced = true;
-                    console.log('📌 Modelo fijado en AR');
+            // Input: place model on select. If no plane hit, fallback 1.5m in front of camera
+            this._onXRSelect = (ev) => {
+                try {
+                    if (this.model && this.reticle && this.reticle.visible) {
+                        this.model.position.setFromMatrixPosition(this.reticle.matrix);
+                        this.model.position.y = 0; // keep on floor (optional)
+                        this.hasPlaced = true;
+                        console.log('📌 Modelo fijado en AR (hit-test)');
+                        return;
+                    }
+
+                    // Fallback: viewer pose forward
+                    const frame = this._lastXRFrame;
+                    if (frame && this.xrRefSpace) {
+                        const viewerPose = frame.getViewerPose(this.xrRefSpace);
+                        if (viewerPose && viewerPose.views && viewerPose.views[0]) {
+                            const m = new THREE.Matrix4().fromArray(viewerPose.views[0].transform.matrix);
+                            const pos = new THREE.Vector3().setFromMatrixPosition(m);
+                            const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(new THREE.Matrix4().extractRotation(m));
+                            const fallbackPos = pos.clone().add(dir.multiplyScalar(1.5));
+                            this.model.position.copy(fallbackPos);
+                            this.model.position.y = Math.max(0, this.model.position.y);
+                            this.hasPlaced = true;
+                            console.log('📌 Modelo fijado en AR (fallback sin plano)');
+                        }
+                    }
+                } catch (e) {
+                    console.warn('onXRSelect fallback error:', e);
                 }
             };
             this.xrSession.addEventListener('select', this._onXRSelect);
@@ -837,6 +870,7 @@ class Model3DManager {
         if (!frame || !this.renderer || !this.scene || !this.camera) return;
 
         const session = frame.session;
+        this._lastXRFrame = frame;
         // Update hit-test
         if (this.xrHitTestSource && this.xrRefSpace) {
             const results = frame.getHitTestResults(this.xrHitTestSource);
@@ -863,6 +897,22 @@ class Model3DManager {
                     }
                 } else {
                     this.reticle.visible = false && !this.hasPlaced;
+                }
+            }
+        }
+
+        // Transient input hits (on tap)
+        if (this.xrTransientHitTestSource && this.xrRefSpace) {
+            const transientResults = frame.getHitTestResultsForTransientInput(this.xrTransientHitTestSource);
+            if (transientResults && transientResults.length > 0) {
+                const first = transientResults[0];
+                if (first && first.results && first.results.length > 0) {
+                    const pose = first.results[0].getPose(this.xrRefSpace);
+                    if (pose && this.reticle && !this.hasPlaced) {
+                        this.reticle.visible = true;
+                        this.reticle.matrix.fromArray(pose.transform.matrix);
+                        this._xrHits++;
+                    }
                 }
             }
         }
@@ -1487,20 +1537,6 @@ class VirtualAssistantApp {
                 // Desactivar el tap-placement legacy para AR XR
                 if (this.model3dManager) this.model3dManager.enableTapPlacement(false);
                 if (this.ui.arStatus) this.ui.arStatus.textContent = 'WebXR AR activo';
-
-                // Fallback automático si no hay hits en 6s
-                setTimeout(async () => {
-                    try {
-                        if (!this.isInAR) return;
-                        if (!this.model3dManager || !this.model3dManager.xrSession) return;
-                        if (typeof this.model3dManager._xrHits === 'number' && this.model3dManager._xrHits === 0) {
-                            console.warn('↩️ Fallback: sin hit-test en tiempo. Volviendo a cámara HTML.');
-                            await this.model3dManager.stopARSession();
-                            if (this.ui.camera) this.ui.camera.style.display = 'block';
-                            this.model3dManager.enableTapPlacement(true);
-                        }
-                    } catch (_) {}
-                }, 6000);
             } else {
                 // Fallback: pseudo-AR con cámara HTML y raycast al plano Y=0
                 if (this.ui.camera) this.ui.camera.style.display = 'block';
