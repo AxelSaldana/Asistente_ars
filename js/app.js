@@ -446,6 +446,10 @@ class Model3DManager {
         this._xrHits = 0;              // number of hit-test results observed
         this._xrStartTs = 0;           // session start timestamp
         this._lastXRFrame = null;      // last XRFrame for select fallback
+        // Anchors
+        this.xrAnchor = null;          // active XRAnchor
+        this.xrAnchorSpace = null;     // anchor space to get poses
+        this._lastHitResult = null;    // cache last XRHitTestResult
         // Controles
         this._controls = {
             isDragging: false,
@@ -748,7 +752,7 @@ class Model3DManager {
             this.renderer.xr.setReferenceSpaceType?.('local');
             this.xrSession = await navigator.xr.requestSession('immersive-ar', {
                 requiredFeatures: ['hit-test', 'dom-overlay'],
-                optionalFeatures: ['local-floor', 'bounded-floor', 'unbounded', 'light-estimation'],
+                optionalFeatures: ['local-floor', 'bounded-floor', 'unbounded', 'light-estimation', 'anchors'],
                 domOverlay: { root: document.body }
             });
 
@@ -773,10 +777,11 @@ class Model3DManager {
             // Create hit-test source from viewer forward ray (more reliable on some devices)
             let hitTestSource = null;
             try {
-                hitTestSource = await this.xrSession.requestHitTestSource({
+                const useOffset = (typeof XRRay !== 'undefined');
+                hitTestSource = await this.xrSession.requestHitTestSource(useOffset ? {
                     space: this.xrViewerSpace,
-                    offsetRay: new XRRay() // forward from viewer
-                });
+                    offsetRay: new XRRay()
+                } : { space: this.xrViewerSpace });
             } catch (e) {
                 console.warn('requestHitTestSource with offsetRay falló, probando sin offsetRay:', e);
                 hitTestSource = await this.xrSession.requestHitTestSource({ space: this.xrViewerSpace });
@@ -799,19 +804,41 @@ class Model3DManager {
             this._xrHits = 0;
             this._xrStartTs = performance.now ? performance.now() : Date.now();
 
-            // Input: place model on select. If no plane hit, fallback 1.5m in front of camera
+            // Input: place model on select. Prefer anchors; if no plane hit, fallback 1.5m in front of camera
             this._onXRSelect = (ev) => {
                 try {
+                    // If we have a recent hit result, try to create an anchor
+                    const frame = this._lastXRFrame;
+                    if (this._lastHitResult && frame && typeof this._lastHitResult.createAnchor === 'function') {
+                        this._lastHitResult.createAnchor().then((anchor) => {
+                            this.xrAnchor = anchor;
+                            this.xrAnchorSpace = anchor.anchorSpace;
+                            this.hasPlaced = true;
+                            if (this.reticle) this.reticle.visible = false;
+                            console.log('📌 Modelo anclado con XRAnchor');
+                            // Aviso UI
+                            try { this.canvas?.dispatchEvent(new CustomEvent('xr-anchored')); } catch (_) {}
+                        }).catch((e) => {
+                            console.warn('No se pudo crear anchor, usando posición de retícula:', e);
+                            if (this.model && this.reticle) {
+                                this.model.position.setFromMatrixPosition(this.reticle.matrix);
+                                this.hasPlaced = true;
+                                if (this.reticle) this.reticle.visible = false;
+                                try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-no-anchor')); } catch (_) {}
+                            }
+                        });
+                        return;                    
+                    }
+
+                    // Si no tenemos hit anclable pero sí retícula visible, colocar en esa pose
                     if (this.model && this.reticle && this.reticle.visible) {
                         this.model.position.setFromMatrixPosition(this.reticle.matrix);
-                        this.model.position.y = 0; // keep on floor (optional)
                         this.hasPlaced = true;
-                        console.log('📌 Modelo fijado en AR (hit-test)');
+                        console.log('📌 Modelo fijado en AR (hit-test sin anchor)');
                         return;
                     }
 
                     // Fallback: viewer pose forward
-                    const frame = this._lastXRFrame;
                     if (frame && this.xrRefSpace) {
                         const viewerPose = frame.getViewerPose(this.xrRefSpace);
                         if (viewerPose && viewerPose.views && viewerPose.views[0]) {
@@ -820,9 +847,9 @@ class Model3DManager {
                             const dir = new THREE.Vector3(0, 0, -1).applyMatrix4(new THREE.Matrix4().extractRotation(m));
                             const fallbackPos = pos.clone().add(dir.multiplyScalar(1.5));
                             this.model.position.copy(fallbackPos);
-                            this.model.position.y = Math.max(0, this.model.position.y);
                             this.hasPlaced = true;
                             console.log('📌 Modelo fijado en AR (fallback sin plano)');
+                            try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-fallback')); } catch (_) {}
                         }
                     }
                 } catch (e) {
@@ -875,11 +902,15 @@ class Model3DManager {
         if (this.xrHitTestSource && this.xrRefSpace) {
             const results = frame.getHitTestResults(this.xrHitTestSource);
             if (results && results.length > 0) {
-                const pose = results[0].getPose(this.xrRefSpace);
+                const hit = results[0];
+                this._lastHitResult = hit;
+                const pose = hit.getPose(this.xrRefSpace);
                 if (pose && this.reticle) {
                     this.reticle.visible = !this.hasPlaced; // hide reticle after placement
                     this.reticle.matrix.fromArray(pose.transform.matrix);
                     this._xrHits++;
+                    // Aviso UI: se detecta plano
+                    try { this.canvas?.dispatchEvent(new CustomEvent('xr-plane-detected')); } catch (_) {}
                 }
             } else if (this.reticle) {
                 // If no hits, try to place reticle 1.5m in front of the camera for visual confirmation
@@ -917,6 +948,17 @@ class Model3DManager {
             }
         }
 
+        // If anchored, update model pose from anchor space to keep it fixed in the real world
+        if (this.xrAnchorSpace) {
+            const anchorPose = frame.getPose(this.xrAnchorSpace, this.xrRefSpace);
+            if (anchorPose && this.model) {
+                const m = new THREE.Matrix4().fromArray(anchorPose.transform.matrix);
+                this.model.matrixAutoUpdate = false;
+                this.model.matrix.copy(m);
+                this.model.matrix.decompose(this.model.position, this.model.quaternion, this.model.scale);
+            }
+        }
+
         // Animate and render
         const deltaTime = this.clock.getDelta();
         if (this.mixer && this.modelLoaded) this.mixer.update(deltaTime);
@@ -926,7 +968,13 @@ class Model3DManager {
         this._xrFrames++;
         if (this._xrStartTs && ((performance.now ? performance.now() : Date.now()) - this._xrStartTs) > 5000) {
             if (this._xrHits === 0) {
-                console.warn('⏳ Sin resultados de hit-test en 5s. Considera fallback o mejora iluminación/superficie.');
+                console.warn('⏳ Sin resultados de hit-test en 5s. Considera mover el dispositivo o tocar para colocar al frente.');
+                if (this.ui && this.ui.arStatus) {
+                    try {
+                        this.ui.arStatus.classList.remove('hidden');
+                        this.ui.arStatus.textContent = 'Sin plano: toca para colocar al frente o mueve el teléfono';
+                    } catch (_) {}
+                }
             }
             // Only report once
             this._xrStartTs = 0;
@@ -1654,6 +1702,23 @@ class VirtualAssistantApp {
             }
         });
         if (this.ui.arMicBtn) this.ui.arMicBtn.addEventListener('click', () => this.startVoiceInteraction(true));
+
+        // Listeners para eventos XR (emitidos desde Model3DManager)
+        if (this.model3dManager && this.model3dManager.canvas) {
+            const c = this.model3dManager.canvas;
+            c.addEventListener('xr-no-plane', () => {
+                if (this.ui.arStatus) {
+                    this.ui.arStatus.classList.remove('hidden');
+                    this.ui.arStatus.textContent = 'Sin plano: toca para colocar al frente o mueve el teléfono';
+                }
+            });
+            c.addEventListener('xr-plane-detected', () => {
+                if (this.ui.arStatus) {
+                    this.ui.arStatus.classList.remove('hidden');
+                    this.ui.arStatus.textContent = 'Plano detectado: toca para fijar el avatar';
+                }
+            });
+        }
 
         if (this.ui.userInput) {
             this.ui.userInput.addEventListener('keypress', (e) => {
