@@ -2120,14 +2120,21 @@ class VirtualAssistantApp {
     async setupFallbackAR(statusText) {
         console.log('📹 Configurando AR con cámara HTML...');
         
+        // Crear e inicializar CameraManager si no existe
+        if (!this.cameraManager) {
+            console.log('📷 Creando CameraManager...');
+            this.cameraManager = new CameraManager();
+        }
+        
         // Asegurar que la cámara esté iniciada
-        if (this.cameraManager && !this.cameraManager.isInitialized) {
+        if (!this.cameraManager.isInitialized) {
             console.log('📷 Iniciando cámara para fallback...');
             try {
                 await this.cameraManager.init();
                 console.log('✅ Cámara iniciada para fallback');
             } catch (error) {
                 console.error('❌ Error iniciando cámara:', error);
+                // Continuar sin cámara
             }
         }
         
@@ -2138,7 +2145,7 @@ class VirtualAssistantApp {
         
         if (this.model3dManager) {
             this.model3dManager.setVisible(true);
-            this.model3dManager.setARMode(false); // Usar modo cámara HTML
+            this.model3dManager.setARMode(true); // Usar modo AR para fondo transparente
             this.model3dManager.enableTapPlacement(true);
             console.log('🎭 Modelo 3D configurado para fallback');
         }
@@ -2165,6 +2172,11 @@ class VirtualAssistantApp {
             let instructions = 'Toca la pantalla para colocar el avatar.';
             
             if (isAndroid) {
+                instructions += '<br><br><div style="background: rgba(33,150,243,0.2); padding: 8px; border-radius: 4px; margin-top: 8px;">';
+                instructions += '<strong>📹 ¿No ves la cámara?</strong><br>';
+                instructions += 'Usa el botón "Test Cámara" para activarla manualmente.';
+                instructions += '</div>';
+                
                 if (isChrome) {
                     instructions += '<br><small>💡 Para WebXR completo: chrome://flags/#webxr-incubations</small>';
                 } else if (isFirefox) {
