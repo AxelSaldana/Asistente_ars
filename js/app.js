@@ -48,12 +48,12 @@ class GeminiClient {
 
     async init() {
         try {
-            console.log('🤖 CONECTANDO GEMINI 2.0...');
+            console.log('Conectando con Gemini 2.0...');
 
             const testResult = await this.testConnection();
             if (testResult) {
                 this.isInitialized = true;
-                console.log('✅ GEMINI 2.0 CONECTADO!');
+                console.log('Gemini 2.0 conectado correctamente');
                 return true;
             } else {
                 throw new Error('No se pudo conectar con Gemini 2.0');
@@ -241,7 +241,7 @@ class SpeechManager {
 
     async initIOSFallback() {
         try {
-            console.log('🍎 Configurando fallback para iOS Safari...');
+            console.log('Configurando fallback para iOS Safari...');
             
             // Verificar MediaRecorder support
             if (!('MediaRecorder' in window)) {
@@ -272,7 +272,7 @@ class SpeechManager {
 
             await this.setupSpeechSynthesis();
             this.isInitialized = true;
-            console.log('✅ Fallback iOS configurado correctamente');
+            console.log('Fallback iOS configurado correctamente');
             return true;
             
         } catch (error) {
@@ -458,7 +458,7 @@ class SpeechManager {
     }
 
     async listenIOSFallback() {
-        console.log('🍎 Usando transcripción web para iOS...');
+        console.log('Usando transcripción web para iOS...');
         
         if (!this.mediaRecorder || !this.stream) {
             console.error('❌ MediaRecorder no configurado');
@@ -824,7 +824,7 @@ class Model3DManager {
 
     async init() {
         try {
-            console.log('🎭 Inicializando Model 3D...');
+            console.log('Inicializando Model 3D...');
 
             if (typeof THREE === 'undefined') {
                 throw new Error('Three.js no disponible');
@@ -838,7 +838,7 @@ class Model3DManager {
             // CARGAR TU MODELO DIRECTAMENTE
             try {
                 await this.loadModel();
-                console.log('✅ TU MODELO CARGADO!');
+                console.log('Modelo cargado correctamente');
             } catch (error) {
                 console.warn('⚠️ No se pudo cargar tu modelo:', error);
                 this.createTemporaryModel();
@@ -847,7 +847,7 @@ class Model3DManager {
             this.enableControls();
 
             this.startRenderLoop();
-            console.log('✅ Model 3D Manager listo');
+            console.log('Model 3D Manager listo');
         } catch (error) {
             console.error('❌ Error Model 3D:', error);
             this.createTemporaryModel();
@@ -857,22 +857,22 @@ class Model3DManager {
 
     async loadModel() {
         return new Promise((resolve, reject) => {
-            console.log('📦 CARGANDO:', CONFIG.MODEL.PATH);
+            console.log('Cargando modelo:', CONFIG.MODEL.PATH);
 
             const loader = new THREE.GLTFLoader();
 
             // Configurar DRACO si está disponible
             if (THREE.DRACOLoader) {
                 const dracoLoader = new THREE.DRACOLoader();
-                dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+                dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
                 loader.setDRACOLoader(dracoLoader);
-                console.log('🗜️ DRACO configurado');
+                console.log('DRACO configurado');
             }
 
             loader.load(
                 CONFIG.MODEL.PATH,
                 (gltf) => {
-                    console.log('🎉 ¡AVATAR_PRUEBA.GLB CARGADO!');
+                    console.log('Modelo 3D cargado correctamente');
 
                     this.model = gltf.scene;
                     this.modelLoaded = true;
@@ -931,7 +931,7 @@ class Model3DManager {
     }
 
     createTemporaryModel() {
-        console.log('🔧 Creando modelo temporal visible...');
+        console.log('Creando modelo temporal visible...');
 
         // Crear cubo brillante que se vea
         const geometry = new THREE.BoxGeometry(2, 2, 2);
@@ -947,7 +947,7 @@ class Model3DManager {
 
         this.scene.add(this.model);
 
-        console.log('✅ CUBO ROJO TEMPORAL CREADO');
+        console.log('Modelo temporal creado');
     }
 
     setupRenderer() {
@@ -1178,13 +1178,11 @@ class Model3DManager {
             try {
                 // Intentar con XRRay primero (más preciso)
                 if (typeof XRRay !== 'undefined' && !isFirefox) {
-                    console.log('🎯 Usando XRRay para hit-test');
                     hitTestSource = await this.xrSession.requestHitTestSource({
                         space: this.xrViewerSpace,
                         offsetRay: new XRRay()
                     });
                 } else {
-                    console.log('🎯 Usando hit-test básico');
                     hitTestSource = await this.xrSession.requestHitTestSource({ 
                         space: this.xrViewerSpace 
                     });
@@ -1196,7 +1194,6 @@ class Model3DManager {
                     hitTestSource = await this.xrSession.requestHitTestSource({ 
                         space: this.xrViewerSpace 
                     });
-                    console.log('✅ Hit-test source creado con fallback');
                 } catch (e2) {
                     console.error('❌ No se pudo crear hit-test source:', e2);
                     // Continuar sin hit-test
@@ -1210,9 +1207,7 @@ class Model3DManager {
                     this.xrTransientHitTestSource = await this.xrSession.requestHitTestSourceForTransientInput({ 
                         profile: 'generic-touchscreen' 
                     });
-                    console.log('✅ Transient hit-test configurado');
                 } else {
-                    console.log('📝 Saltando transient hit-test en', isFirefox ? 'Firefox' : 'Brave');
                     this.xrTransientHitTestSource = null;
                 }
             } catch (e) {
@@ -1241,7 +1236,6 @@ class Model3DManager {
                             if (this.reticle) this.reticle.visible = false;
                             // Deshabilitar matrixAutoUpdate para que el anchor controle la posición
                             if (this.model) this.model.matrixAutoUpdate = false;
-                            console.log('📌 Modelo anclado con XRAnchor');
                             // Aviso UI
                             try { this.canvas?.dispatchEvent(new CustomEvent('xr-anchored')); } catch (_) {}
                         }).catch((e) => {
@@ -1255,7 +1249,6 @@ class Model3DManager {
                                 this.model.updateMatrix();
                                 this.hasPlaced = true;
                                 if (this.reticle) this.reticle.visible = false;
-                                console.log('📌 Modelo fijado en AR (sin anchor) en:', this.model.position);
                                 try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-no-anchor')); } catch (_) {}
                             }
                         });
@@ -1272,7 +1265,6 @@ class Model3DManager {
                         this.model.updateMatrix();
                         this.hasPlaced = true;
                         if (this.reticle) this.reticle.visible = false;
-                        console.log('📌 Modelo fijado en AR (hit-test sin anchor) en:', this.model.position);
                         return;
                     }
 
@@ -1289,7 +1281,6 @@ class Model3DManager {
                             this.model.matrixAutoUpdate = false;
                             this.model.updateMatrix();
                             this.hasPlaced = true;
-                            console.log('📌 Modelo fijado en AR (fallback sin plano) en:', fallbackPos);
                             try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-fallback')); } catch (_) {}
                         }
                     }
@@ -1965,7 +1956,7 @@ class VirtualAssistantApp {
             // Dejar al usuario en Preview por defecto tras permisos
             this.enterPreviewMode();
 
-            console.log('🎉 ¡Sistema completo!');
+            console.log('Sistema inicializado correctamente');
 
         } catch (error) {
             console.error('❌ ERROR CRÍTICO:', error);
@@ -2002,7 +1993,7 @@ class VirtualAssistantApp {
     }
 
     enterPreviewMode() {
-        console.log('🎭 Mostrando modelo...');
+        console.log('Mostrando modelo...');
 
         this.isInPreview = true;
         this.isInAR = false;
@@ -2118,20 +2109,20 @@ class VirtualAssistantApp {
     }
 
     async setupFallbackAR(statusText) {
-        console.log('📹 Configurando AR con cámara HTML...');
+        console.log('Configurando AR con cámara HTML...');
         
         // Crear e inicializar CameraManager si no existe
         if (!this.cameraManager) {
-            console.log('📷 Creando CameraManager...');
+            console.log('Creando CameraManager...');
             this.cameraManager = new CameraManager();
         }
         
         // Asegurar que la cámara esté iniciada
         if (!this.cameraManager.isInitialized) {
-            console.log('📷 Iniciando cámara para fallback...');
+            console.log('Iniciando cámara para fallback...');
             try {
                 await this.cameraManager.init();
-                console.log('✅ Cámara iniciada para fallback');
+                console.log('Cámara iniciada para fallback');
             } catch (error) {
                 console.error('❌ Error iniciando cámara:', error);
                 // Continuar sin cámara
@@ -2140,51 +2131,36 @@ class VirtualAssistantApp {
         
         if (this.ui.camera) {
             this.ui.camera.style.display = 'block';
-            console.log('📹 Cámara HTML visible');
+            console.log('Cámara HTML visible');
         }
         
         if (this.model3dManager) {
             this.model3dManager.setVisible(true);
             this.model3dManager.setARMode(true); // Usar modo AR para fondo transparente
             this.model3dManager.enableTapPlacement(true);
-            console.log('🎭 Modelo 3D configurado para fallback');
+            console.log('Modelo 3D configurado para fallback');
         }
         
         if (this.ui.arStatus) this.ui.arStatus.textContent = statusText;
         
-        console.log('✅ Fallback AR configurado completamente');
+        console.log('Fallback AR configurado completamente');
     }
     
     showARSuccessMessage() {
         if (this.ui.arResponse) {
             this.ui.arResponse.innerHTML = `
                 <div style="color: #00ff88; font-size: 16px; margin-bottom: 10px;">
-                    ✅ ¡AR WebXR Activado!
+                    ✅ Realidad Aumentada Activada
                 </div>
-                <div style="color: #ccc;">Toca la pantalla para colocar el avatar en el mundo real.</div>
+                <div style="color: #ccc;">Toca la pantalla para colocar el avatar en tu espacio.</div>
             `;
         }
     }
     
     showARFallbackMessage(isAndroid, isChrome, isFirefox, isBrave) {
         if (this.ui.arResponse) {
-            let message = '📱 AR Optimizado Activado!';
-            let instructions = 'Toca la pantalla para colocar el avatar.';
-            
-            if (isAndroid) {
-                instructions += '<br><br><div style="background: rgba(33,150,243,0.2); padding: 8px; border-radius: 4px; margin-top: 8px;">';
-                instructions += '<strong>📹 ¿No ves la cámara?</strong><br>';
-                instructions += 'Usa el botón "Test Cámara" para activarla manualmente.';
-                instructions += '</div>';
-                
-                if (isChrome) {
-                    instructions += '<br><small>💡 Para WebXR completo: chrome://flags/#webxr-incubations</small>';
-                } else if (isFirefox) {
-                    instructions += '<br><small>🦊 Usando modo compatible con Firefox Android</small>';
-                } else if (isBrave) {
-                    instructions += '<br><small>🦁 Usando modo compatible con Brave Android</small>';
-                }
-            }
+            let message = '📱 Realidad Aumentada Activada';
+            let instructions = 'Toca la pantalla para colocar el avatar en tu espacio.';
             
             this.ui.arResponse.innerHTML = `
                 <div style="color: #4CAF50; font-size: 16px; margin-bottom: 10px;">
@@ -2287,38 +2263,6 @@ class VirtualAssistantApp {
             }
         });
         if (this.ui.arMicBtn) this.ui.arMicBtn.addEventListener('click', () => this.startVoiceInteraction(true));
-        
-        // Test Camera button
-        const testCameraBtn = document.getElementById('testCameraBtn');
-        if (testCameraBtn) {
-            testCameraBtn.addEventListener('click', async () => {
-                console.log('🧪 Test de cámara iniciado');
-                if (this.ui.arResponse) {
-                    this.ui.arResponse.innerHTML = '<div style="color: #2196F3;">🧪 Testeando cámara...</div>';
-                }
-                
-                try {
-                    if (!this.cameraManager) {
-                        this.cameraManager = new CameraManager();
-                    }
-                    
-                    await this.cameraManager.init();
-                    
-                    if (this.ui.camera) {
-                        this.ui.camera.style.display = 'block';
-                        console.log('✅ Cámara test exitoso');
-                        if (this.ui.arResponse) {
-                            this.ui.arResponse.innerHTML = '<div style="color: #4CAF50;">✅ Cámara funcionando correctamente</div>';
-                        }
-                    }
-                } catch (error) {
-                    console.error('❌ Error en test de cámara:', error);
-                    if (this.ui.arResponse) {
-                        this.ui.arResponse.innerHTML = '<div style="color: #f44336;">❌ Error: ' + error.message + '</div>';
-                    }
-                }
-            });
-        }
 
         // Listeners para eventos XR (emitidos desde Model3DManager)
         if (this.model3dManager && this.model3dManager.canvas) {
@@ -2532,19 +2476,14 @@ class VirtualAssistantApp {
             const reason = this.speech.unsupportedReason || 'Reconocimiento de voz no disponible en este navegador o contexto.';
             this.updateChatStatus(`❌ ${reason}`);
             
-            // Mostrar mensaje específico para iOS
-            if (this.speech.isIOSSafari) {
-                this.updateChatStatus('🍎 iOS detectado: Funcionalidad de voz adaptada');
-            }
             return;
         }
 
         try {
             console.log('🎤 Iniciando reconocimiento...');
             
-            // Mensaje diferente para iOS
             if (this.speech.isIOSSafari) {
-                this.updateChatStatus('🎤 Escuchando (iOS Safari)...');
+                this.updateChatStatus('🎤 Escuchando...');
             } else {
                 this.updateChatStatus('🎤 Habla ahora...');
             }
@@ -2667,6 +2606,6 @@ class VirtualAssistantApp {
 
 // ===== INICIALIZACIÓN =====
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🎉 Iniciando Asistente Virtual AR...');
+    console.log('Iniciando Asistente Virtual AR...');
     window.app = new VirtualAssistantApp();
 });

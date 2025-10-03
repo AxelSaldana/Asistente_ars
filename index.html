@@ -46,11 +46,8 @@
                 <div class="permission-item">🎤 Micrófono (Comandos de voz)</div>
                 <div class="permission-item">🤖 IA Gemini (Chat inteligente)</div>
             </div>
-            <div class="ios-notice" style="margin-top: 10px; padding: 8px; background: rgba(76,175,80,0.1); border-radius: 6px; font-size: 12px; color: #4CAF50;">
-                🍎 <strong>Usuarios de iPhone/iPad:</strong> Funcionalidad de voz optimizada para Safari. Los comandos de voz funcionan con interfaz adaptada.
-            </div>
-            <div class="android-notice" style="margin-top: 8px; padding: 8px; background: rgba(33,150,243,0.1); border-radius: 6px; font-size: 12px; color: #2196F3;">
-                🤖 <strong>Usuarios de Android:</strong> AR optimizado para Chrome, Firefox y Brave. Funciona con cámara HTML si WebXR no está disponible.
+            <div class="compatibility-notice" style="margin-top: 10px; padding: 8px; background: rgba(76,175,80,0.1); border-radius: 6px; font-size: 12px; color: #4CAF50;">
+                ✨ <strong>Experiencia optimizada</strong> para todos los dispositivos móviles y navegadores modernos.
             </div>
             <button id="requestPermissions" class="permission-btn">Activar Asistente AR</button>
         </div>
@@ -83,7 +80,7 @@
         <div class="input-container">
             <input type="text" id="userInput" placeholder="Escribe tu mensaje...">
             <button class="send-btn" id="sendBtn">→</button>
-            <button class="voice-btn" id="micBtn" title="Comandos de voz (adaptado para iOS Safari)">🎤</button>
+            <button class="voice-btn" id="micBtn" title="Comandos de voz">🎤</button>
         </div>
         <div class="chat-status" id="chatStatus"></div>
     </div>
@@ -94,10 +91,9 @@
         <div class="ar-input-container">
             <input type="text" id="arInput" placeholder="Pregunta en AR...">
             <button class="ar-send-btn" id="arSendBtn">→</button>
-            <button class="voice-btn" id="arMicBtn" title="Comandos de voz (adaptado para iOS Safari)">🎤</button>
+            <button class="voice-btn" id="arMicBtn" title="Comandos de voz">🎤</button>
         </div>
         <div class="ar-controls">
-            <button class="ar-close-btn" id="testCameraBtn" style="margin-right:8px; background: #2196F3;">Test Cámara</button>
             <button class="ar-close-btn" id="arRelocateBtn" style="margin-right:8px;">Recolocar</button>
             <button class="ar-close-btn" id="arCloseBtn">Salir AR</button>
         </div>
