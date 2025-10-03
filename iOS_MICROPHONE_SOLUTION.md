@@ -1,22 +1,32 @@
-# Solución Completa para Micrófono en iOS/iPhone
+# Solución Completa para iOS y Android
 
-## Problema Identificado
+## Problemas Identificados
 
-El micrófono no funcionaba en dispositivos iOS/iPhone debido a las limitaciones de Safari con la Web Speech API.
+### iOS/iPhone
+- El micrófono no funcionaba en Safari debido a limitaciones con Web Speech API
+- Permisos de micrófono más restrictivos
+- No soporta `webkitSpeechRecognition`
 
-## Limitaciones de iOS Safari
-
-1. **No soporta `webkitSpeechRecognition`** - Solo disponible en Chrome para Android
-2. **Permisos de micrófono más restrictivos**
-3. **Web Speech API limitada o no disponible**
+### Android (Chrome, Firefox, Brave)
+- AR no funcionaba en navegadores Android
+- WebXR limitado o deshabilitado por defecto
+- Diferentes niveles de soporte según el navegador
+- Necesidad de fallbacks robustos
 
 ## Solución Implementada ✅
 
-### 1. Detección Automática de iOS
+### 1. Detección Automática Multiplataforma
 ```javascript
+// iOS Detection
 this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 this.isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 this.isIOSSafari = this.isIOS && this.isSafari;
+
+// Android Detection
+const isAndroid = /Android/i.test(navigator.userAgent);
+const isChrome = /Chrome/i.test(navigator.userAgent);
+const isFirefox = /Firefox/i.test(navigator.userAgent);
+const isBrave = /Brave/i.test(navigator.userAgent) || (navigator.brave && navigator.brave.isBrave);
 ```
 
 ### 2. Sistema Híbrido de Grabación + Entrada Manual

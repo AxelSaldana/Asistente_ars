@@ -1029,28 +1029,75 @@ class Model3DManager {
     // ===== WebXR AR Session with Hit-Test =====
     async startARSession(useDomOverlay = true) {
         try {
+            // Detectar dispositivo y navegador
+            const isAndroid = /Android/i.test(navigator.userAgent);
+            const isChrome = /Chrome/i.test(navigator.userAgent);
+            const isFirefox = /Firefox/i.test(navigator.userAgent);
+            const isBrave = /Brave/i.test(navigator.userAgent) || (navigator.brave && navigator.brave.isBrave);
+            
+            console.log('📱 Dispositivo detectado:', {
+                isAndroid,
+                isChrome,
+                isFirefox,
+                isBrave,
+                userAgent: navigator.userAgent
+            });
+
+            // Verificar soporte WebXR
             if (!navigator.xr || !this.renderer || !this.renderer.xr) {
-                console.warn('WebXR no disponible');
+                console.warn('⚠️ WebXR no disponible en este navegador');
+                if (isAndroid) {
+                    console.log('🤖 Android detectado: usando fallback de cámara HTML');
+                }
                 return false;
             }
 
-            const supported = await navigator.xr.isSessionSupported?.('immersive-ar');
+            // Verificar soporte de sesión AR
+            let supported = false;
+            try {
+                supported = await navigator.xr.isSessionSupported?.('immersive-ar');
+            } catch (error) {
+                console.warn('⚠️ Error verificando soporte AR:', error);
+                supported = false;
+            }
+            
             if (!supported) {
-                console.warn('Sesión immersive-ar no soportada');
+                console.warn('⚠️ Sesión immersive-ar no soportada');
+                if (isAndroid) {
+                    if (isChrome) {
+                        console.log('🔧 Chrome Android: WebXR puede requerir activación manual');
+                        console.log('📝 Instrucciones: chrome://flags/#webxr-incubations');
+                    } else if (isFirefox) {
+                        console.log('🦊 Firefox Android: WebXR limitado, usando fallback');
+                    } else if (isBrave) {
+                        console.log('🦁 Brave Android: WebXR puede estar deshabilitado, usando fallback');
+                    }
+                }
                 return false;
             }
 
-            // Request AR session
+            // Request AR session con configuración optimizada para Android
             console.log('🕶️ Solicitando sesión WebXR immersive-ar...');
             this.renderer.xr.setReferenceSpaceType?.('local');
+            
+            // Configuración base más conservadora para Android
             const sessionInit = {
-                requiredFeatures: ['hit-test'],
-                optionalFeatures: ['local-floor', 'bounded-floor', 'unbounded', 'light-estimation', 'anchors']
+                requiredFeatures: [],
+                optionalFeatures: ['hit-test', 'local-floor', 'bounded-floor', 'unbounded']
             };
-            if (useDomOverlay) {
+            
+            // Añadir características adicionales solo si no es Android problemático
+            if (!isAndroid || isChrome) {
+                sessionInit.optionalFeatures.push('light-estimation', 'anchors');
+            }
+            
+            // Dom overlay solo en navegadores compatibles
+            if (useDomOverlay && !isFirefox && !isBrave) {
                 sessionInit.optionalFeatures.push('dom-overlay');
                 sessionInit.domOverlay = { root: document.body };
             }
+            
+            console.log('⚙️ Configuración de sesión:', sessionInit);
             this.xrSession = await navigator.xr.requestSession('immersive-ar', sessionInit);
 
             // Set session to renderer
@@ -1064,32 +1111,67 @@ class Model3DManager {
             }
             this.xrViewerSpace = await this.xrSession.requestReferenceSpace('viewer');
 
-            console.log('✅ Sesión WebXR iniciada. environmentBlendMode =', this.xrSession.environmentBlendMode);
+            console.log('✅ Sesión WebXR iniciada exitosamente!');
+            console.log('🌈 environmentBlendMode:', this.xrSession.environmentBlendMode);
+            console.log('🛠️ inputSources:', this.xrSession.inputSources?.length || 0);
+            
+            // Verificar modo de mezcla
             if (this.xrSession.environmentBlendMode && this.xrSession.environmentBlendMode === 'opaque') {
-                console.warn('El modo de mezcla es "opaque" (no hay passthrough de cámara). Se usará el fallback.');
-                try { await this.stopARSession(); } catch (_) {}
-                return false;
+                console.warn('⚠️ Modo "opaque" detectado (sin passthrough de cámara)');
+                if (isAndroid) {
+                    console.log('🤖 Android: esto es normal en algunos dispositivos, continuando...');
+                    // En Android, a veces funciona a pesar del modo opaque
+                } else {
+                    console.warn('🚫 Usando fallback por modo opaque');
+                    try { await this.stopARSession(); } catch (_) {}
+                    return false;
+                }
             }
 
-            // Create hit-test source from viewer forward ray (more reliable on some devices)
+            // Crear hit-test source con fallbacks para Android
             let hitTestSource = null;
             try {
-                const useOffset = (typeof XRRay !== 'undefined');
-                hitTestSource = await this.xrSession.requestHitTestSource(useOffset ? {
-                    space: this.xrViewerSpace,
-                    offsetRay: new XRRay()
-                } : { space: this.xrViewerSpace });
+                // Intentar con XRRay primero (más preciso)
+                if (typeof XRRay !== 'undefined' && !isFirefox) {
+                    console.log('🎯 Usando XRRay para hit-test');
+                    hitTestSource = await this.xrSession.requestHitTestSource({
+                        space: this.xrViewerSpace,
+                        offsetRay: new XRRay()
+                    });
+                } else {
+                    console.log('🎯 Usando hit-test básico');
+                    hitTestSource = await this.xrSession.requestHitTestSource({ 
+                        space: this.xrViewerSpace 
+                    });
+                }
             } catch (e) {
-                console.warn('requestHitTestSource with offsetRay falló, probando sin offsetRay:', e);
-                hitTestSource = await this.xrSession.requestHitTestSource({ space: this.xrViewerSpace });
+                console.warn('⚠️ requestHitTestSource falló:', e);
+                try {
+                    // Fallback sin offsetRay
+                    hitTestSource = await this.xrSession.requestHitTestSource({ 
+                        space: this.xrViewerSpace 
+                    });
+                    console.log('✅ Hit-test source creado con fallback');
+                } catch (e2) {
+                    console.error('❌ No se pudo crear hit-test source:', e2);
+                    // Continuar sin hit-test
+                }
             }
             this.xrHitTestSource = hitTestSource;
 
-            // Transient input hit-test (for screen taps)
+            // Transient input hit-test (para toques en pantalla) - opcional en Android
             try {
-                this.xrTransientHitTestSource = await this.xrSession.requestHitTestSourceForTransientInput({ profile: 'generic-touchscreen' });
+                if (!isFirefox && !isBrave) {
+                    this.xrTransientHitTestSource = await this.xrSession.requestHitTestSourceForTransientInput({ 
+                        profile: 'generic-touchscreen' 
+                    });
+                    console.log('✅ Transient hit-test configurado');
+                } else {
+                    console.log('📝 Saltando transient hit-test en', isFirefox ? 'Firefox' : 'Brave');
+                    this.xrTransientHitTestSource = null;
+                }
             } catch (e) {
-                console.warn('requestHitTestSourceForTransientInput no disponible:', e);
+                console.warn('⚠️ requestHitTestSourceForTransientInput no disponible:', e);
                 this.xrTransientHitTestSource = null;
             }
 
@@ -1193,6 +1275,18 @@ class Model3DManager {
             return true;
         } catch (err) {
             console.error('❌ startARSession error:', err);
+            
+            // Mensajes específicos para Android
+            if (isAndroid) {
+                if (err.name === 'NotSupportedError') {
+                    console.log('📝 Android: WebXR no soportado en este dispositivo/navegador');
+                } else if (err.name === 'SecurityError') {
+                    console.log('🔒 Android: Error de seguridad - verifica HTTPS y permisos');
+                } else if (err.name === 'NotAllowedError') {
+                    console.log('🚫 Android: Permisos denegados - permite cámara y sensores');
+                }
+            }
+            
             return false;
         }
     }
@@ -1885,7 +1979,7 @@ class VirtualAssistantApp {
             this.model3dManager.playIdleAnimation();
         }
 
-        console.log('✅ Modelo visible');
+        console.log('✅ Modelo visible en preview');
     }
 
     enterARMode() {
@@ -1893,40 +1987,59 @@ class VirtualAssistantApp {
         this.isInPreview = false;
 
         const startXR = async () => {
+            // Detectar dispositivo para mejor manejo
+            const isAndroid = /Android/i.test(navigator.userAgent);
+            const isChrome = /Chrome/i.test(navigator.userAgent);
+            const isFirefox = /Firefox/i.test(navigator.userAgent);
+            const isBrave = /Brave/i.test(navigator.userAgent) || (navigator.brave && navigator.brave.isBrave);
+            
+            console.log('🚀 Iniciando modo AR...');
+            
             // Force fallback path if configured
             if (CONFIG && CONFIG.AR && CONFIG.AR.FORCE_FALLBACK) {
                 console.warn('⚙️ FORCE_FALLBACK activo: usando cámara HTML.');
-                if (this.ui.camera) this.ui.camera.style.display = 'block';
-                if (this.model3dManager) {
-                    this.model3dManager.setVisible(true);
-                    this.model3dManager.setARMode(false);
-                    this.model3dManager.enableTapPlacement(true);
-                }
-                if (this.ui.arStatus) this.ui.arStatus.textContent = 'Fallback AR (cámara HTML)';
+                this.setupFallbackAR('Fallback AR (configurado)');
                 return;
             }
 
+            // Intentar WebXR primero
             let xrOk = false;
             if (this.model3dManager) {
                 this.model3dManager.setVisible(true);
                 this.model3dManager.setARMode(true);
+                
+                console.log('🔍 Intentando WebXR AR...');
                 xrOk = await this.model3dManager.startARSession();
             }
 
             if (xrOk) {
-                // WebXR usa video passthrough; escondemos la cámara HTML
+                // WebXR exitoso
+                console.log('✅ WebXR AR iniciado correctamente');
                 if (this.ui.camera) this.ui.camera.style.display = 'none';
-                // Desactivar el tap-placement legacy para AR XR
                 if (this.model3dManager) this.model3dManager.enableTapPlacement(false);
                 if (this.ui.arStatus) this.ui.arStatus.textContent = 'WebXR AR activo';
+                
+                // Mostrar mensaje de éxito
+                this.showARSuccessMessage();
             } else {
-                // Fallback: pseudo-AR con cámara HTML y raycast al plano Y=0
-                if (this.ui.camera) this.ui.camera.style.display = 'block';
-                if (this.model3dManager) {
-                    this.model3dManager.setVisible(true);
-                    this.model3dManager.enableTapPlacement(true);
+                // Fallback para Android y otros navegadores
+                console.log('🔄 WebXR no disponible, usando fallback...');
+                
+                let fallbackReason = 'Fallback AR';
+                if (isAndroid) {
+                    if (isChrome) {
+                        fallbackReason = 'AR optimizado para Chrome Android';
+                    } else if (isFirefox) {
+                        fallbackReason = 'AR optimizado para Firefox Android';
+                    } else if (isBrave) {
+                        fallbackReason = 'AR optimizado para Brave Android';
+                    } else {
+                        fallbackReason = 'AR optimizado para Android';
+                    }
                 }
-                if (this.ui.arStatus) this.ui.arStatus.textContent = 'Fallback AR (cámara HTML)';
+                
+                this.setupFallbackAR(fallbackReason);
+                this.showARFallbackMessage(isAndroid, isChrome, isFirefox, isBrave);
             }
         };
         startXR();
@@ -1945,6 +2058,53 @@ class VirtualAssistantApp {
         if (this.ui.arStatus) this.ui.arStatus.classList.remove('hidden');
 
         setTimeout(() => this.showARWelcome(), 1000);
+    }
+
+    setupFallbackAR(statusText) {
+        console.log('📹 Configurando AR con cámara HTML...');
+        
+        if (this.ui.camera) this.ui.camera.style.display = 'block';
+        if (this.model3dManager) {
+            this.model3dManager.setVisible(true);
+            this.model3dManager.setARMode(false); // Usar modo cámara HTML
+            this.model3dManager.enableTapPlacement(true);
+        }
+        if (this.ui.arStatus) this.ui.arStatus.textContent = statusText;
+    }
+    
+    showARSuccessMessage() {
+        if (this.ui.arResponse) {
+            this.ui.arResponse.innerHTML = `
+                <div style="color: #00ff88; font-size: 16px; margin-bottom: 10px;">
+                    ✅ ¡AR WebXR Activado!
+                </div>
+                <div style="color: #ccc;">Toca la pantalla para colocar el avatar en el mundo real.</div>
+            `;
+        }
+    }
+    
+    showARFallbackMessage(isAndroid, isChrome, isFirefox, isBrave) {
+        if (this.ui.arResponse) {
+            let message = '📱 AR Optimizado Activado!';
+            let instructions = 'Toca la pantalla para colocar el avatar.';
+            
+            if (isAndroid) {
+                if (isChrome) {
+                    instructions += '<br><small>💡 Para WebXR completo: chrome://flags/#webxr-incubations</small>';
+                } else if (isFirefox) {
+                    instructions += '<br><small>🦊 Usando modo compatible con Firefox Android</small>';
+                } else if (isBrave) {
+                    instructions += '<br><small>🦁 Usando modo compatible con Brave Android</small>';
+                }
+            }
+            
+            this.ui.arResponse.innerHTML = `
+                <div style="color: #4CAF50; font-size: 16px; margin-bottom: 10px;">
+                    ${message}
+                </div>
+                <div style="color: #ccc;">${instructions}</div>
+            `;
+        }
     }
 
     exitARMode() {
