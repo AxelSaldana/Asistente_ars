@@ -2047,7 +2047,7 @@ class VirtualAssistantApp {
             // Force fallback path if configured
             if (CONFIG && CONFIG.AR && CONFIG.AR.FORCE_FALLBACK) {
                 console.warn('⚙️ FORCE_FALLBACK activo: usando cámara HTML.');
-                this.setupFallbackAR('Fallback AR (configurado)');
+                await this.setupFallbackAR('Fallback AR (configurado)');
                 return;
             }
 
@@ -2061,8 +2061,8 @@ class VirtualAssistantApp {
                 xrOk = await this.model3dManager.startARSession();
             }
 
-            if (xrOk) {
-                // WebXR exitoso
+            if (xrOk && !isAndroid) {
+                // WebXR exitoso solo en dispositivos no-Android
                 console.log('✅ WebXR AR iniciado correctamente');
                 if (this.ui.camera) this.ui.camera.style.display = 'none';
                 if (this.model3dManager) this.model3dManager.enableTapPlacement(false);
@@ -2071,6 +2071,14 @@ class VirtualAssistantApp {
                 // Mostrar mensaje de éxito
                 this.showARSuccessMessage();
             } else {
+                // En Android, siempre usar fallback aunque WebXR se "inicie"
+                if (isAndroid && xrOk) {
+                    console.log('🤖 Android detectado: forzando fallback para mejor compatibilidad');
+                    // Detener WebXR si se había iniciado
+                    if (this.model3dManager && this.model3dManager.xrSession) {
+                        await this.model3dManager.stopARSession();
+                    }
+                }
                 // Fallback para Android y otros navegadores
                 console.log('🔄 WebXR no disponible, usando fallback...');
                 
@@ -2087,7 +2095,7 @@ class VirtualAssistantApp {
                     }
                 }
                 
-                this.setupFallbackAR(fallbackReason);
+                await this.setupFallbackAR(fallbackReason);
                 this.showARFallbackMessage(isAndroid, isChrome, isFirefox, isBrave);
             }
         };
@@ -2109,16 +2117,35 @@ class VirtualAssistantApp {
         setTimeout(() => this.showARWelcome(), 1000);
     }
 
-    setupFallbackAR(statusText) {
+    async setupFallbackAR(statusText) {
         console.log('📹 Configurando AR con cámara HTML...');
         
-        if (this.ui.camera) this.ui.camera.style.display = 'block';
+        // Asegurar que la cámara esté iniciada
+        if (this.cameraManager && !this.cameraManager.isInitialized) {
+            console.log('📷 Iniciando cámara para fallback...');
+            try {
+                await this.cameraManager.init();
+                console.log('✅ Cámara iniciada para fallback');
+            } catch (error) {
+                console.error('❌ Error iniciando cámara:', error);
+            }
+        }
+        
+        if (this.ui.camera) {
+            this.ui.camera.style.display = 'block';
+            console.log('📹 Cámara HTML visible');
+        }
+        
         if (this.model3dManager) {
             this.model3dManager.setVisible(true);
             this.model3dManager.setARMode(false); // Usar modo cámara HTML
             this.model3dManager.enableTapPlacement(true);
+            console.log('🎭 Modelo 3D configurado para fallback');
         }
+        
         if (this.ui.arStatus) this.ui.arStatus.textContent = statusText;
+        
+        console.log('✅ Fallback AR configurado completamente');
     }
     
     showARSuccessMessage() {
@@ -2248,6 +2275,38 @@ class VirtualAssistantApp {
             }
         });
         if (this.ui.arMicBtn) this.ui.arMicBtn.addEventListener('click', () => this.startVoiceInteraction(true));
+        
+        // Test Camera button
+        const testCameraBtn = document.getElementById('testCameraBtn');
+        if (testCameraBtn) {
+            testCameraBtn.addEventListener('click', async () => {
+                console.log('🧪 Test de cámara iniciado');
+                if (this.ui.arResponse) {
+                    this.ui.arResponse.innerHTML = '<div style="color: #2196F3;">🧪 Testeando cámara...</div>';
+                }
+                
+                try {
+                    if (!this.cameraManager) {
+                        this.cameraManager = new CameraManager();
+                    }
+                    
+                    await this.cameraManager.init();
+                    
+                    if (this.ui.camera) {
+                        this.ui.camera.style.display = 'block';
+                        console.log('✅ Cámara test exitoso');
+                        if (this.ui.arResponse) {
+                            this.ui.arResponse.innerHTML = '<div style="color: #4CAF50;">✅ Cámara funcionando correctamente</div>';
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ Error en test de cámara:', error);
+                    if (this.ui.arResponse) {
+                        this.ui.arResponse.innerHTML = '<div style="color: #f44336;">❌ Error: ' + error.message + '</div>';
+                    }
+                }
+            });
+        }
 
         // Listeners para eventos XR (emitidos desde Model3DManager)
         if (this.model3dManager && this.model3dManager.canvas) {
