@@ -217,8 +217,17 @@ class SpeechManager {
                 return false;
             }
 
+            console.log('🔧 Configurando Speech Recognition...');
             this.setupSpeechRecognition();
-            await this.setupSpeechSynthesis();
+            
+            console.log('🔧 Configurando Speech Synthesis...');
+            try {
+                await this.setupSpeechSynthesis();
+                console.log('🔧 Speech Synthesis configurado');
+            } catch (synthError) {
+                console.warn('⚠️ Error en Speech Synthesis, continuando sin TTS:', synthError);
+                // Continuar sin síntesis de voz
+            }
 
             this.isInitialized = true;
             console.log('✅ Speech Manager inicializado correctamente');
@@ -300,25 +309,61 @@ class SpeechManager {
     }
 
     async setupSpeechSynthesis() {
-        if (!this.synthesis) return;
+        if (!this.synthesis) {
+            console.log('🔇 Speech synthesis no disponible');
+            return;
+        }
         
         return new Promise((resolve) => {
+            let resolved = false;
+            
             const loadVoices = () => {
+                if (resolved) return;
+                resolved = true;
+                
                 this.voices = this.synthesis.getVoices();
+                console.log('🎵 Voces disponibles:', this.voices.length);
+                
                 const spanishVoice = this.voices.find(voice => 
                     voice.lang.startsWith('es') || voice.lang.includes('ES')
                 );
                 if (spanishVoice) {
                     this.selectedVoice = spanishVoice;
                     console.log('🗣️ Voz en español seleccionada:', spanishVoice.name);
+                } else {
+                    console.log('🔤 Usando voz por defecto');
                 }
                 resolve();
             };
 
-            if (this.voices.length === 0) {
-                this.synthesis.onvoiceschanged = loadVoices;
-            } else {
-                loadVoices();
+            // Timeout para evitar que se cuelgue
+            const timeout = setTimeout(() => {
+                if (!resolved) {
+                    console.log('⏰ Timeout en carga de voces, continuando...');
+                    resolved = true;
+                    resolve();
+                }
+            }, 2000);
+
+            // Intentar cargar voces
+            try {
+                this.voices = this.synthesis.getVoices();
+                if (this.voices.length > 0) {
+                    clearTimeout(timeout);
+                    loadVoices();
+                } else {
+                    this.synthesis.onvoiceschanged = () => {
+                        clearTimeout(timeout);
+                        loadVoices();
+                    };
+                }
+            } catch (error) {
+                console.warn('⚠️ Error configurando síntesis:', error);
+                clearTimeout(timeout);
+                if (!resolved) {
+                    resolved = true;
+                    resolve();
+                }
             }
         });
     }
@@ -1895,12 +1940,16 @@ class VirtualAssistantApp {
 
             // 3. Speech
             this.updatePermissionStatus('🎤 Configurando voz...');
+            console.log('📋 Iniciando configuración de voz...');
             const speechOk = await this.speech.init();
+            console.log('📋 Speech init resultado:', speechOk);
             if (!speechOk) {
                 const reason = (this.speech && this.speech.unsupportedReason) ? this.speech.unsupportedReason : 'Voz no disponible';
+                console.log('📋 Speech falló:', reason);
                 this.updatePermissionStatus(`❌ ${reason}`);
                 throw new Error(reason);
             }
+            console.log('📋 ✅ Speech configurado correctamente');
 
             // 4. Modelo 3D (reutilizar si ya está cargado para preview)
             this.updatePermissionStatus('🎭 Preparando modelo 3D...');
