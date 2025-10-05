@@ -198,6 +198,18 @@ class SpeechManager {
         this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
         this.isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
         this.isIOSSafari = this.isIOS && this.isSafari;
+        
+        // DEBUG: Mostrar detección en pantalla
+        setTimeout(() => {
+            this.showDebugAlert('🔍 DEVICE DETECTION', JSON.stringify({
+                userAgent: navigator.userAgent,
+                isIOS: this.isIOS,
+                isSafari: this.isSafari,
+                isIOSSafari: this.isIOSSafari,
+                hasMediaRecorder: 'MediaRecorder' in window
+            }, null, 2));
+        }, 1000);
+        
         // Fallback para iOS
         this.mediaRecorder = null;
         this.audioChunks = [];
@@ -527,13 +539,19 @@ class SpeechManager {
 
         // Si estamos en iOS Safari, decidir el mejor método
         if (this.isIOSSafari) {
+            this.showDebugAlert('🍎 iOS CHECK', JSON.stringify({
+                hasMediaRecorder: !!this.mediaRecorder,
+                hasStream: !!this.stream,
+                mediaRecorderState: this.mediaRecorder?.state || 'null'
+            }, null, 2));
+            
             if (this.mediaRecorder) {
                 console.log('🍎 iOS: Intentando grabación con MediaRecorder...');
                 this.showDebugAlert('🍎 iOS PATH', 'Usando MediaRecorder...');
                 return await this.listenIOSFallback();
             } else {
                 console.log('🍎 iOS: Usando entrada manual directa');
-                this.showDebugAlert('🍎 iOS PATH', 'Entrada manual directa...');
+                this.showDebugAlert('🍎 iOS PATH', 'Entrada manual directa (NO MediaRecorder)');
                 return await this.showManualInputFallback();
             }
         }
