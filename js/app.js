@@ -230,30 +230,44 @@ class SpeechManager {
     async init() {
         try {
             console.log('🎤 Inicializando Speech Manager...');
-            console.log('📱 Dispositivo detectado:', {
+            this.showDebugAlert('🎤 INIT START', 'Iniciando Speech Manager...');
+            
+            const deviceInfo = {
                 isIOS: this.isIOS,
                 isSafari: this.isSafari,
                 isIOSSafari: this.isIOSSafari,
                 userAgent: navigator.userAgent,
                 isSecureContext: window.isSecureContext,
                 protocol: window.location.protocol
-            });
+            };
+            
+            console.log('📱 Dispositivo detectado:', deviceInfo);
+            this.showDebugAlert('📱 DEVICE INFO', JSON.stringify(deviceInfo, null, 2));
 
             // Verificar contexto seguro (HTTPS) especialmente importante para iOS
             if (!window.isSecureContext && this.isIOSSafari) {
                 console.error('❌ iOS requiere HTTPS para acceso al micrófono');
+                this.showDebugAlert('❌ NO HTTPS', 'iOS requiere HTTPS');
                 this.unsupportedReason = 'iOS Safari requiere HTTPS para usar el micrófono. Accede desde https://';
                 return false;
             }
 
             // Verificar soporte de Speech Recognition
             const hasSpeechRecognition = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
+            this.showDebugAlert('🔍 SPEECH CHECK', JSON.stringify({
+                hasSpeechRecognition,
+                hasWebkitSpeechRecognition: 'webkitSpeechRecognition' in window,
+                hasSpeechRecognition: 'SpeechRecognition' in window,
+                isIOSSafari: this.isIOSSafari
+            }, null, 2));
 
             if (!hasSpeechRecognition) {
                 if (this.isIOSSafari) {
                     console.warn('🍎 Safari en iOS no soporta Web Speech API, usando fallback con MediaRecorder');
+                    this.showDebugAlert('🍎 NO SPEECH API', 'Llamando a initIOSFallback...');
                     return await this.initIOSFallback();
                 } else {
+                    this.showDebugAlert('❌ NO SPEECH API', 'Navegador no soportado');
                     this.unsupportedReason = 'Este navegador no soporta reconocimiento de voz. Usa Chrome/Edge en escritorio.';
                     return false;
                 }
@@ -345,11 +359,11 @@ class SpeechManager {
 
             // Verificar MediaRecorder support
             if (!('MediaRecorder' in window)) {
-                console.warn('⚠️ MediaRecorder no disponible, intentando Web Audio API...');
-                this.showDebugAlert('⚠️ NO MediaRecorder', 'Intentando Web Audio API para micrófono...');
+                console.warn('⚠️ MediaRecorder no disponible, usando input file capture...');
+                this.showDebugAlert('⚠️ NO MediaRecorder', 'Usando input file capture para iOS...');
                 
-                // Intentar configurar Web Audio API como alternativa
-                return await this.initWebAudioFallback();
+                // Configurar input file capture para iOS Safari
+                return await this.initFileCaptureFallback();
             }
             
             this.showDebugAlert('✅ MediaRecorder OK', 'MediaRecorder disponible, solicitando permisos...');
@@ -457,6 +471,157 @@ class SpeechManager {
                 this.unsupportedReason = 'iOS Safari: funcionalidad de voz limitada.';
                 return false;
             }
+        }
+    }
+
+    // ===== FILE CAPTURE FALLBACK PARA iOS SAFARI =====
+    async initFileCaptureFallback() {
+        try {
+            console.log('📁 Configurando file capture para iOS Safari...');
+            this.showDebugAlert('📁 FILE CAPTURE', 'Configurando input file capture...');
+
+            // Crear input file oculto para captura de audio
+            this.audioFileInput = document.createElement('input');
+            this.audioFileInput.type = 'file';
+            this.audioFileInput.accept = 'audio/*';
+            this.audioFileInput.capture = 'microphone';
+            this.audioFileInput.style.display = 'none';
+            this.audioFileInput.id = 'hiddenAudioInput';
+            
+            // Agregar al DOM
+            document.body.appendChild(this.audioFileInput);
+
+            // Configurar event listener
+            this.audioFileInput.addEventListener('change', async (event) => {
+                await this.handleAudioFileCapture(event);
+            });
+
+            await this.setupSpeechSynthesis();
+            this.isInitialized = true;
+            this.hasFileCapture = true;
+            
+            console.log('✅ File capture configurado correctamente');
+            this.showDebugAlert('✅ FILE CAPTURE OK', 'Input file capture listo');
+            return true;
+
+        } catch (error) {
+            console.error('❌ Error configurando file capture:', error);
+            this.showDebugAlert('❌ FILE CAPTURE ERROR', error.message);
+            
+            // Fallback final a entrada manual
+            return await this.fallbackToManualInput();
+        }
+    }
+
+    // ===== MANEJAR ARCHIVO DE AUDIO CAPTURADO =====
+    async handleAudioFileCapture(event) {
+        const file = event.target.files[0];
+        if (!file) {
+            console.warn('⚠️ No se seleccionó archivo de audio');
+            return;
+        }
+
+        console.log('🎤 Archivo de audio capturado:', file.name, file.size, 'bytes');
+        this.showDebugAlert('🎤 AUDIO FILE', `${file.name} (${file.size} bytes)`);
+
+        try {
+            // Mostrar modal de progreso
+            const progressModal = this.showGladiaProgressModal();
+            
+            // Enviar a Gladia API
+            const transcript = await this.transcribeAudioFile(file);
+            progressModal.close();
+
+            if (transcript) {
+                console.log('✅ Transcripción obtenida:', transcript);
+                this.showDebugAlert('✅ TRANSCRIPCIÓN', transcript);
+                
+                // Resolver la promesa pendiente del listen
+                if (this.currentListenResolve) {
+                    this.currentListenResolve(transcript);
+                    this.currentListenResolve = null;
+                }
+            } else {
+                console.warn('⚠️ No se pudo transcribir el audio');
+                this.showDebugAlert('⚠️ NO TRANSCRIPT', 'Transcripción falló - intenta grabar de nuevo');
+                
+                // No hay fallback manual - el usuario debe grabar de nuevo
+                if (this.currentListenResolve) {
+                    this.currentListenResolve(null);
+                    this.currentListenResolve = null;
+                }
+            }
+
+        } catch (error) {
+            console.error('❌ Error procesando archivo de audio:', error);
+            this.showDebugAlert('❌ AUDIO ERROR', 'Error procesando audio - intenta de nuevo');
+            
+            // No hay fallback manual - el usuario debe grabar de nuevo
+            if (this.currentListenResolve) {
+                this.currentListenResolve(null);
+                this.currentListenResolve = null;
+            }
+        }
+
+        // Limpiar input para permitir seleccionar el mismo archivo de nuevo
+        event.target.value = '';
+    }
+
+    // ===== TRANSCRIBIR ARCHIVO DE AUDIO CON GLADIA =====
+    async transcribeAudioFile(audioFile) {
+        try {
+            console.log('🔄 Enviando archivo a Gladia API...', audioFile.size, 'bytes');
+
+            // Preparar FormData para Gladia
+            const formData = new FormData();
+            formData.append('audio', audioFile);
+            formData.append('language', 'es');
+            formData.append('output_format', 'json');
+
+            // Configurar petición con timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+            const response = await fetch(CONFIG.GLADIA.ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${CONFIG.GLADIA.API_KEY}`,
+                    'Accept': 'application/json'
+                },
+                body: formData,
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ Gladia API Error:', response.status, errorText);
+                throw new Error(`Gladia API Error ${response.status}: ${errorText}`);
+            }
+
+            const result = await response.json();
+            console.log('📝 Respuesta completa de Gladia:', result);
+
+            // Extraer transcripción
+            let transcription = this.extractGladiaTranscription(result);
+
+            if (!transcription || transcription.trim().length === 0) {
+                console.warn('⚠️ Transcripción vacía de Gladia');
+                return null;
+            }
+
+            console.log('✅ Transcripción Gladia obtenida:', transcription);
+            return transcription.trim();
+
+        } catch (error) {
+            console.error('❌ Error en Gladia API:', error);
+
+            if (error.name === 'AbortError') {
+                console.warn('⏰ Timeout: Gladia tardó demasiado en responder');
+            }
+
+            return null;
         }
     }
 
@@ -637,25 +802,30 @@ class SpeechManager {
         if (this.isListening) return null;
         // Si estamos en iOS Safari, decidir el mejor método
         if (this.isIOSSafari) {
-            this.showDebugAlert('iOS CHECK', JSON.stringify({
+            this.showDebugAlert('🍎 iOS CHECK', JSON.stringify({
                 hasMediaRecorder: !!this.mediaRecorder,
+                hasFileCapture: !!this.hasFileCapture,
                 hasWebAudio: !!this.audioContext,
                 hasStream: !!this.stream,
                 mediaRecorderState: this.mediaRecorder?.state || 'null'
             }, null, 2));
             
             if (this.mediaRecorder) {
-                console.log('iOS: Intentando grabación con MediaRecorder...');
-                this.showDebugAlert('iOS PATH', 'Usando MediaRecorder...');
+                console.log('🍎 iOS: Intentando grabación con MediaRecorder...');
+                this.showDebugAlert('🍎 iOS PATH', 'Usando MediaRecorder...');
                 return await this.listenIOSFallback();
+            } else if (this.hasFileCapture) {
+                console.log('🍎 iOS: Usando file capture...');
+                this.showDebugAlert('🍎 iOS PATH', 'Usando file capture...');
+                return await this.listenFileCapture();
             } else if (this.audioContext && this.stream) {
-                console.log('iOS: Usando Web Audio API...');
-                this.showDebugAlert('iOS PATH', 'Usando Web Audio API...');
+                console.log('🍎 iOS: Usando Web Audio API...');
+                this.showDebugAlert('🍎 iOS PATH', 'Usando Web Audio API...');
                 return await this.listenWebAudioFallback();
             } else {
-                console.log('iOS: Usando entrada manual directa');
-                this.showDebugAlert('iOS PATH', 'Entrada manual directa (NO audio APIs)');
-                return await this.showManualInputFallback();
+                console.log('🍎 iOS: Sin métodos de grabación disponibles');
+                this.showDebugAlert('🍎 iOS PATH', 'Sin métodos de grabación disponibles');
+                return null;
             }
         }
 
@@ -778,13 +948,13 @@ class SpeechManager {
                         if (transcript) {
                             resolve(transcript);
                         } else {
-                            // Fallback: mostrar interfaz de entrada manual
-                            resolve(await this.showManualInputFallback());
+                            // Sin transcripción - devolver null
+                            resolve(null);
                         }
                     } catch (error) {
                         console.error('❌ Error procesando audio:', error);
                         this.showDebugAlert('❌ AUDIO ERROR', error.message);
-                        resolve(await this.showManualInputFallback());
+                        resolve(null);
                     }
                 } else {
                     this.showDebugAlert('❌ NO AUDIO', 'Sin chunks de audio');
@@ -811,6 +981,29 @@ class SpeechManager {
         });
     }
 
+    // ===== GRABACIÓN CON FILE CAPTURE =====
+    async listenFileCapture() {
+        console.log('📁 Usando file capture para grabación...');
+        this.showDebugAlert('📁 FILE CAPTURE', 'Abriendo grabadora nativa de iOS...');
+
+        if (!this.audioFileInput) {
+            console.error('❌ File input no configurado');
+            this.showDebugAlert('❌ NO FILE INPUT', 'File input no configurado');
+            return null;
+        }
+
+        return new Promise((resolve) => {
+            // Guardar el resolve para usarlo cuando se capture el archivo
+            this.currentListenResolve = resolve;
+            
+            // Activar el input file para abrir la grabadora nativa
+            this.audioFileInput.click();
+            
+            console.log('📁 Input file activado - esperando grabación del usuario...');
+            this.showDebugAlert('📁 WAITING', 'Esperando que grabes audio...');
+        });
+    }
+
     // ===== GRABACIÓN CON WEB AUDIO API =====
     async listenWebAudioFallback() {
         console.log('🎵 Usando Web Audio API para grabación...');
@@ -819,7 +1012,7 @@ class SpeechManager {
         if (!this.audioContext || !this.stream) {
             console.error('❌ Web Audio API no configurado');
             this.showDebugAlert('❌ NO WEB AUDIO', 'Web Audio API no configurado');
-            return await this.showManualInputFallback();
+            return null;
         }
 
         return new Promise((resolve) => {
