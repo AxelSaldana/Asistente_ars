@@ -23,6 +23,10 @@ const CONFIG = {
         MAX_TOKENS: 2000,
         TEMPERATURE: 0.9
     },
+    GLADIA: {
+        API_KEY: 'd817e425-5dde-40eb-b034-8292ade1e8a2', // ← Reemplazar con tu API key de Gladia
+        ENDPOINT: 'https://api.gladia.io/v2/transcription'
+    },
     SPEECH: {
         LANGUAGE: 'es-ES',
         VOICE_RATE: 1.0,
@@ -94,9 +98,9 @@ class GeminiClient {
                 }),
                 signal: controller.signal
             });
-            
+
             clearTimeout(timeoutId);
-            
+
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(`Error ${response.status}: ${errorText}`);
@@ -112,7 +116,7 @@ class GeminiClient {
             }
 
             throw new Error('Respuesta inválida');
-            
+
         } catch (error) {
             clearTimeout(timeoutId);
             if (error.name === 'AbortError') {
@@ -221,7 +225,7 @@ class SpeechManager {
 
             // Verificar soporte de Speech Recognition
             const hasSpeechRecognition = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
-            
+
             if (!hasSpeechRecognition) {
                 if (this.isIOSSafari) {
                     console.warn('🍎 Safari en iOS no soporta Web Speech API, usando fallback con MediaRecorder');
@@ -235,7 +239,7 @@ class SpeechManager {
             // Solicitar permiso de micrófono explícito con mejor manejo para iOS
             try {
                 console.log('🎤 Solicitando permisos de micrófono...');
-                
+
                 // Configuración específica para iOS
                 const constraints = this.isIOSSafari ? {
                     audio: {
@@ -246,22 +250,22 @@ class SpeechManager {
                         channelCount: { ideal: 1 }
                     }
                 } : { audio: true };
-                
+
                 const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 console.log('✅ Permisos de micrófono concedidos');
-                
+
                 // Verificar que el stream tiene tracks de audio activos
                 const audioTracks = stream.getAudioTracks();
                 if (audioTracks.length === 0) {
                     throw new Error('No se obtuvieron tracks de audio');
                 }
-                
+
                 console.log('🎤 Tracks de audio:', audioTracks.length, 'Estado:', audioTracks[0].readyState);
                 stream.getTracks().forEach(track => track.stop());
-                
+
             } catch (e) {
                 console.error('❌ Error al solicitar permisos:', e);
-                
+
                 let errorMessage = 'Acceso al micrófono denegado.';
                 if (this.isIOSSafari) {
                     if (e.name === 'NotAllowedError') {
@@ -276,14 +280,14 @@ class SpeechManager {
                 } else {
                     errorMessage = `Acceso al micrófono denegado: ${e.name || e.message || 'desconocido'}`;
                 }
-                
+
                 this.unsupportedReason = errorMessage;
                 return false;
             }
 
             console.log('🔧 Configurando Speech Recognition...');
             this.setupSpeechRecognition();
-            
+
             console.log('🔧 Configurando Speech Synthesis...');
             try {
                 await this.setupSpeechSynthesis();
@@ -306,14 +310,14 @@ class SpeechManager {
     async initIOSFallback() {
         try {
             console.log('🍎 Configurando fallback optimizado para iOS Safari...');
-            
+
             // Verificar contexto seguro primero
             if (!window.isSecureContext) {
                 console.error('❌ iOS requiere contexto seguro (HTTPS)');
                 this.unsupportedReason = 'iOS Safari requiere HTTPS para usar el micrófono.';
                 return false;
             }
-            
+
             // Verificar MediaRecorder support
             if (!('MediaRecorder' in window)) {
                 console.warn('❌ MediaRecorder no disponible, usando entrada manual directa');
@@ -326,12 +330,12 @@ class SpeechManager {
 
             // Solicitar permisos específicos para iOS con configuración optimizada y timeout
             console.log('🎤 Solicitando permisos específicos para iOS...');
-            
+
             const permissionTimeout = new Promise((_, reject) => {
                 setTimeout(() => reject(new Error('Timeout solicitando permisos')), 10000);
             });
-            
-            const getUserMediaPromise = navigator.mediaDevices.getUserMedia({ 
+
+            const getUserMediaPromise = navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
@@ -340,22 +344,22 @@ class SpeechManager {
                     channelCount: { ideal: 1, min: 1, max: 2 }
                 }
             });
-            
+
             const stream = await Promise.race([getUserMediaPromise, permissionTimeout]);
-            
+
             // Verificar que el stream es válido
             if (!stream || stream.getAudioTracks().length === 0) {
                 throw new Error('Stream de audio inválido');
             }
-            
+
             this.stream = stream;
             console.log('✅ Permisos de audio concedidos en iOS con configuración optimizada');
             console.log('🎤 Audio tracks:', stream.getAudioTracks().length, 'Estado:', stream.getAudioTracks()[0].readyState);
-            
+
             // Configurar MediaRecorder con formato compatible con iOS - Mejorado
             let options = {};
             const supportedTypes = ['audio/mp4', 'audio/webm', 'audio/wav', 'audio/ogg'];
-            
+
             for (const type of supportedTypes) {
                 if (MediaRecorder.isTypeSupported(type)) {
                     options.mimeType = type;
@@ -363,25 +367,25 @@ class SpeechManager {
                     break;
                 }
             }
-            
+
             if (!options.mimeType) {
                 console.log('🔄 Usando formato por defecto del navegador (sin especificar)');
             }
-            
+
             try {
                 this.mediaRecorder = new MediaRecorder(stream, options);
                 console.log('🎤 MediaRecorder configurado exitosamente con:', options.mimeType || 'formato por defecto');
-                
+
                 // Verificar que MediaRecorder está en estado correcto
                 if (this.mediaRecorder.state !== 'inactive') {
                     console.warn('⚠️ MediaRecorder no está en estado inactive:', this.mediaRecorder.state);
                 }
-                
+
             } catch (mediaRecorderError) {
                 console.error('❌ Error creando MediaRecorder:', mediaRecorderError);
                 throw new Error(`MediaRecorder falló: ${mediaRecorderError.message}`);
             }
-            
+
             this.mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
                     this.audioChunks.push(event.data);
@@ -393,10 +397,10 @@ class SpeechManager {
             this.isInitialized = true;
             console.log('✅ Fallback iOS configurado correctamente con MediaRecorder');
             return true;
-            
+
         } catch (error) {
             console.error('❌ Error configurando fallback iOS:', error);
-            
+
             // Diagnóstico específico del error
             let specificError = 'Error desconocido';
             if (error.name === 'NotAllowedError') {
@@ -410,13 +414,13 @@ class SpeechManager {
             } else if (error.message.includes('MediaRecorder')) {
                 specificError = 'Error configurando MediaRecorder';
             }
-            
+
             console.log(`🔍 Error específico: ${specificError}`);
-            
+
             // Fallback del fallback: solo entrada manual
             console.log('🔄 Configurando modo de entrada manual únicamente para iOS');
             this.unsupportedReason = `iOS Safari: ${specificError}. Usará entrada manual para comandos de voz.`;
-            
+
             try {
                 await this.setupSpeechSynthesis();
                 this.isInitialized = true;
@@ -433,7 +437,7 @@ class SpeechManager {
     setupSpeechRecognition() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) return;
-        
+
         this.recognition = new SpeechRecognition();
 
         this.recognition.continuous = false;
@@ -441,11 +445,11 @@ class SpeechManager {
         this.recognition.lang = CONFIG.SPEECH.LANGUAGE;
         this.recognition.maxAlternatives = 1;
 
-        this.recognition.onstart = () => { 
+        this.recognition.onstart = () => {
             this.isListening = true;
             console.log('🎤 Reconocimiento iniciado');
         };
-        this.recognition.onend = () => { 
+        this.recognition.onend = () => {
             this.isListening = false;
             console.log('🎤 Reconocimiento terminado');
         };
@@ -461,18 +465,18 @@ class SpeechManager {
             console.log('🔇 Speech synthesis no disponible');
             return;
         }
-        
+
         return new Promise((resolve) => {
             let resolved = false;
-            
+
             const loadVoices = () => {
                 if (resolved) return;
                 resolved = true;
-                
+
                 this.voices = this.synthesis.getVoices();
                 console.log('🎵 Voces disponibles:', this.voices.length);
-                
-                const spanishVoice = this.voices.find(voice => 
+
+                const spanishVoice = this.voices.find(voice =>
                     voice.lang.startsWith('es') || voice.lang.includes('ES')
                 );
                 if (spanishVoice) {
@@ -541,7 +545,7 @@ class SpeechManager {
                 console.warn('🎤 Web Speech API no disponible');
                 return resolve(null);
             }
-            
+
             const rec = new SpeechRecognition();
             this.recognition = rec;
 
@@ -613,7 +617,7 @@ class SpeechManager {
 
     async listenIOSFallback() {
         console.log('Usando transcripción web para iOS...');
-        
+
         if (!this.mediaRecorder || !this.stream) {
             console.error('❌ MediaRecorder no configurado');
             return null;
@@ -632,16 +636,16 @@ class SpeechManager {
             this.mediaRecorder.onstop = async () => {
                 clearTimeout(timeout);
                 this.isListening = false;
-                
+
                 if (this.audioChunks.length > 0) {
                     try {
                         // Crear blob de audio
                         const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
                         console.log('🎤 Audio capturado:', audioBlob.size, 'bytes');
-                        
+
                         // Intentar transcripción con Web Speech API si está disponible
                         const transcript = await this.transcribeAudioBlob(audioBlob);
-                        
+
                         if (transcript) {
                             resolve(transcript);
                         } else {
@@ -677,24 +681,121 @@ class SpeechManager {
     }
 
     async transcribeAudioBlob(audioBlob) {
-        // Intentar usar Web Speech API con el audio grabado (experimental)
+        // 🍎 iOS Safari: Usar Gladia API para transcripción real
+        if (this.isIOSSafari && CONFIG.GLADIA.API_KEY !== 'TU_GLADIA_API_KEY') {
+            console.log('🍎 iOS Safari: Usando Gladia API para transcripción...');
+            return await this.transcribeWithGladia(audioBlob);
+        }
+
+        // Fallback experimental para otros casos
         try {
-            // Convertir blob a URL para reproducción
-            const audioUrl = URL.createObjectURL(audioBlob);
-            const audio = new Audio(audioUrl);
-            
-            // Esta es una aproximación - Web Speech API no acepta blobs directamente
-            // pero podemos simular el comportamiento
-            console.log('🔄 Intentando transcripción experimental...');
-            
+            console.log('🔄 Intentando transcripción experimental (fallback)...');
+
             // Por ahora retornamos null para usar el fallback manual
-            URL.revokeObjectURL(audioUrl);
+            // En el futuro se podría implementar otra API de transcripción
             return null;
-            
+
         } catch (error) {
             console.warn('⚠️ Transcripción experimental falló:', error);
             return null;
         }
+    }
+
+    // ===== TRANSCRIPCIÓN CON GLADIA API (SOLO iOS/Safari) =====
+    async transcribeWithGladia(audioBlob) {
+        try {
+            console.log('🔄 Enviando audio a Gladia API...', audioBlob.size, 'bytes');
+
+            // Preparar FormData para Gladia
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'recording.webm');
+            formData.append('language', 'es'); // Español
+            formData.append('output_format', 'json');
+
+            // Configurar petición con timeout
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos
+
+            const response = await fetch(CONFIG.GLADIA.ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${CONFIG.GLADIA.API_KEY}`,
+                    'Accept': 'application/json'
+                },
+                body: formData,
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('❌ Gladia API Error:', response.status, errorText);
+                throw new Error(`Gladia API Error ${response.status}: ${errorText}`);
+            }
+
+            const result = await response.json();
+            console.log('📝 Respuesta completa de Gladia:', result);
+
+            // Extraer transcripción (adaptable a diferentes estructuras)
+            let transcription = this.extractGladiaTranscription(result);
+
+            if (!transcription || transcription.trim().length === 0) {
+                console.warn('⚠️ Transcripción vacía de Gladia');
+                return null;
+            }
+
+            console.log('✅ Transcripción Gladia obtenida:', transcription);
+            return transcription.trim();
+
+        } catch (error) {
+            console.error('❌ Error en Gladia API:', error);
+
+            if (error.name === 'AbortError') {
+                console.warn('⏰ Timeout: Gladia tardó demasiado en responder');
+            }
+
+            // Retornar null para usar fallback manual
+            return null;
+        }
+    }
+
+    // ===== EXTRAER TRANSCRIPCIÓN DE RESPUESTA GLADIA =====
+    extractGladiaTranscription(result) {
+        // Intentar diferentes estructuras de respuesta de Gladia
+        if (result.prediction && Array.isArray(result.prediction) && result.prediction.length > 0) {
+            return result.prediction[0].transcription || result.prediction[0].text;
+        }
+
+        if (result.transcription) {
+            return result.transcription;
+        }
+
+        if (result.text) {
+            return result.text;
+        }
+
+        if (result.results && Array.isArray(result.results) && result.results.length > 0) {
+            return result.results[0].transcript || result.results[0].text;
+        }
+
+        // Búsqueda recursiva de texto
+        const findTranscript = (obj) => {
+            if (typeof obj === 'string' && obj.length > 0) return obj;
+            if (typeof obj === 'object' && obj !== null) {
+                for (const key in obj) {
+                    if (key.includes('transcript') || key.includes('text') || key.includes('transcription')) {
+                        const value = obj[key];
+                        if (typeof value === 'string' && value.length > 0) {
+                            return value;
+                        }
+                    }
+                }
+            }
+            return null;
+        };
+
+        return findTranscript(result);
     }
 
     async showManualInputFallback() {
@@ -713,7 +814,7 @@ class SpeechManager {
                 justify-content: center;
                 z-index: 10000;
             `;
-            
+
             const content = document.createElement('div');
             content.style.cssText = `
                 background: #2a2a2a;
@@ -723,13 +824,13 @@ class SpeechManager {
                 width: 400px;
                 text-align: center;
             `;
-            
+
             const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
             const title = isIOS ? '🍎 Comando de Voz (iOS)' : '🎤 Comando de Voz';
-            const description = isIOS ? 
-                'En iOS Safari, escribe tu comando directamente:' : 
+            const description = isIOS ?
+                'En iOS Safari, escribe tu comando directamente:' :
                 'Audio grabado. Escribe lo que dijiste:';
-            
+
             content.innerHTML = `
                 <h3 style="color: #fff; margin-bottom: 15px;">${title}</h3>
                 <p style="color: #ccc; margin-bottom: 15px;">${description}</p>
@@ -746,32 +847,32 @@ class SpeechManager {
                     <button id="voiceCancel" style="background: #f44336; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px;">Cancelar</button>
                 </div>
             `;
-            
+
             modal.appendChild(content);
             document.body.appendChild(modal);
-            
+
             const input = content.querySelector('#voiceInput');
             const okBtn = content.querySelector('#voiceOk');
             const cancelBtn = content.querySelector('#voiceCancel');
-            
+
             // Enfocar input
             setTimeout(() => input.focus(), 100);
-            
+
             const cleanup = () => {
                 document.body.removeChild(modal);
             };
-            
+
             okBtn.onclick = () => {
                 const text = input.value.trim();
                 cleanup();
                 resolve(text || null);
             };
-            
+
             cancelBtn.onclick = () => {
                 cleanup();
                 resolve(null);
             };
-            
+
             input.onkeypress = (e) => {
                 if (e.key === 'Enter') {
                     okBtn.click();
@@ -827,20 +928,20 @@ class SpeechManager {
 
     dispose() {
         this.stopSpeaking();
-        
+
         // Limpiar recursos de iOS
         if (this.stream) {
             this.stream.getTracks().forEach(track => track.stop());
             this.stream = null;
         }
-        
+
         if (this.mediaRecorder) {
             if (this.mediaRecorder.state === 'recording') {
                 this.mediaRecorder.stop();
             }
             this.mediaRecorder = null;
         }
-        
+
         this.isInitialized = false;
     }
 }
@@ -1133,7 +1234,7 @@ class Model3DManager {
             this.renderer.xr.enabled = true;
         }
         // Ensure full transparency in AR
-        try { this.renderer.domElement.style.backgroundColor = 'transparent'; } catch (_) {}
+        try { this.renderer.domElement.style.backgroundColor = 'transparent'; } catch (_) { }
     }
 
     setupScene() {
@@ -1245,7 +1346,7 @@ class Model3DManager {
             const isChrome = /Chrome/i.test(navigator.userAgent);
             const isFirefox = /Firefox/i.test(navigator.userAgent);
             const isBrave = /Brave/i.test(navigator.userAgent) || (navigator.brave && navigator.brave.isBrave);
-            
+
             console.log('📱 Dispositivo detectado:', {
                 isAndroid,
                 isChrome,
@@ -1271,7 +1372,7 @@ class Model3DManager {
                 console.warn('⚠️ Error verificando soporte AR:', error);
                 supported = false;
             }
-            
+
             if (!supported) {
                 console.warn('⚠️ Sesión immersive-ar no soportada');
                 if (isAndroid) {
@@ -1290,24 +1391,24 @@ class Model3DManager {
             // Request AR session con configuración optimizada para Android
             console.log('🕶️ Solicitando sesión WebXR immersive-ar...');
             this.renderer.xr.setReferenceSpaceType?.('local');
-            
+
             // Configuración base más conservadora para Android
             const sessionInit = {
                 requiredFeatures: [],
                 optionalFeatures: ['hit-test', 'local-floor', 'bounded-floor', 'unbounded']
             };
-            
+
             // Añadir características adicionales solo si no es Android problemático
             if (!isAndroid || isChrome) {
                 sessionInit.optionalFeatures.push('light-estimation', 'anchors');
             }
-            
+
             // Dom overlay solo en navegadores compatibles
             if (useDomOverlay && !isFirefox && !isBrave) {
                 sessionInit.optionalFeatures.push('dom-overlay');
                 sessionInit.domOverlay = { root: document.body };
             }
-            
+
             console.log('⚙️ Configuración de sesión:', sessionInit);
             this.xrSession = await navigator.xr.requestSession('immersive-ar', sessionInit);
 
@@ -1325,7 +1426,7 @@ class Model3DManager {
             console.log('✅ Sesión WebXR iniciada exitosamente!');
             console.log('🌈 environmentBlendMode:', this.xrSession.environmentBlendMode);
             console.log('🛠️ inputSources:', this.xrSession.inputSources?.length || 0);
-            
+
             // Verificar modo de mezcla
             if (this.xrSession.environmentBlendMode && this.xrSession.environmentBlendMode === 'opaque') {
                 console.warn('⚠️ Modo "opaque" detectado (sin passthrough de cámara)');
@@ -1334,7 +1435,7 @@ class Model3DManager {
                     // En Android, a veces funciona a pesar del modo opaque
                 } else {
                     console.warn('🚫 Usando fallback por modo opaque');
-                    try { await this.stopARSession(); } catch (_) {}
+                    try { await this.stopARSession(); } catch (_) { }
                     return false;
                 }
             }
@@ -1349,16 +1450,16 @@ class Model3DManager {
                         offsetRay: new XRRay()
                     });
                 } else {
-                    hitTestSource = await this.xrSession.requestHitTestSource({ 
-                        space: this.xrViewerSpace 
+                    hitTestSource = await this.xrSession.requestHitTestSource({
+                        space: this.xrViewerSpace
                     });
                 }
             } catch (e) {
                 console.warn('⚠️ requestHitTestSource falló:', e);
                 try {
                     // Fallback sin offsetRay
-                    hitTestSource = await this.xrSession.requestHitTestSource({ 
-                        space: this.xrViewerSpace 
+                    hitTestSource = await this.xrSession.requestHitTestSource({
+                        space: this.xrViewerSpace
                     });
                 } catch (e2) {
                     console.error('❌ No se pudo crear hit-test source:', e2);
@@ -1370,8 +1471,8 @@ class Model3DManager {
             // Transient input hit-test (para toques en pantalla) - opcional en Android
             try {
                 if (!isFirefox && !isBrave) {
-                    this.xrTransientHitTestSource = await this.xrSession.requestHitTestSourceForTransientInput({ 
-                        profile: 'generic-touchscreen' 
+                    this.xrTransientHitTestSource = await this.xrSession.requestHitTestSourceForTransientInput({
+                        profile: 'generic-touchscreen'
                     });
                 } else {
                     this.xrTransientHitTestSource = null;
@@ -1403,7 +1504,7 @@ class Model3DManager {
                             // Deshabilitar matrixAutoUpdate para que el anchor controle la posición
                             if (this.model) this.model.matrixAutoUpdate = false;
                             // Aviso UI
-                            try { this.canvas?.dispatchEvent(new CustomEvent('xr-anchored')); } catch (_) {}
+                            try { this.canvas?.dispatchEvent(new CustomEvent('xr-anchored')); } catch (_) { }
                         }).catch((e) => {
                             console.warn('No se pudo crear anchor, usando posición de retícula:', e);
                             if (this.model && this.reticle) {
@@ -1415,10 +1516,10 @@ class Model3DManager {
                                 this.model.updateMatrix();
                                 this.hasPlaced = true;
                                 if (this.reticle) this.reticle.visible = false;
-                                try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-no-anchor')); } catch (_) {}
+                                try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-no-anchor')); } catch (_) { }
                             }
                         });
-                        return;                    
+                        return;
                     }
 
                     // Si no tenemos hit anclable pero sí retícula visible, colocar en esa pose
@@ -1447,7 +1548,7 @@ class Model3DManager {
                             this.model.matrixAutoUpdate = false;
                             this.model.updateMatrix();
                             this.hasPlaced = true;
-                            try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-fallback')); } catch (_) {}
+                            try { this.canvas?.dispatchEvent(new CustomEvent('xr-placed-fallback')); } catch (_) { }
                         }
                     }
                 } catch (e) {
@@ -1477,7 +1578,7 @@ class Model3DManager {
             return true;
         } catch (err) {
             console.error('❌ startARSession error:', err);
-            
+
             // Mensajes específicos para Android
             if (isAndroid) {
                 if (err.name === 'NotSupportedError') {
@@ -1488,7 +1589,7 @@ class Model3DManager {
                     console.log('🚫 Android: Permisos denegados - permite cámara y sensores');
                 }
             }
-            
+
             return false;
         }
     }
@@ -1497,7 +1598,7 @@ class Model3DManager {
         try {
             if (this.xrSession) {
                 if (this._onXRSelect) {
-                    try { this.xrSession.removeEventListener('select', this._onXRSelect); } catch (_) {}
+                    try { this.xrSession.removeEventListener('select', this._onXRSelect); } catch (_) { }
                 }
                 await this.xrSession.end();
             }
@@ -1539,7 +1640,7 @@ class Model3DManager {
                     this.reticle.matrix.fromArray(pose.transform.matrix);
                     this._xrHits++;
                     // Aviso UI: se detecta plano
-                    try { this.canvas?.dispatchEvent(new CustomEvent('xr-plane-detected')); } catch (_) {}
+                    try { this.canvas?.dispatchEvent(new CustomEvent('xr-plane-detected')); } catch (_) { }
                 }
             } else if (this.reticle) {
                 // If no hits, try to place reticle 1.5m in front of the camera for visual confirmation
@@ -1603,7 +1704,7 @@ class Model3DManager {
                     try {
                         this.ui.arStatus.classList.remove('hidden');
                         this.ui.arStatus.textContent = 'Sin plano: toca para colocar al frente o mueve el teléfono';
-                    } catch (_) {}
+                    } catch (_) { }
                 }
             }
             // Only report once
@@ -2198,9 +2299,9 @@ class VirtualAssistantApp {
             const isChrome = /Chrome/i.test(navigator.userAgent);
             const isFirefox = /Firefox/i.test(navigator.userAgent);
             const isBrave = /Brave/i.test(navigator.userAgent) || (navigator.brave && navigator.brave.isBrave);
-            
+
             console.log('🚀 Iniciando modo AR...');
-            
+
             // Force fallback path if configured
             if (CONFIG && CONFIG.AR && CONFIG.AR.FORCE_FALLBACK) {
                 console.warn('⚙️ FORCE_FALLBACK activo: usando cámara HTML.');
@@ -2213,7 +2314,7 @@ class VirtualAssistantApp {
             if (this.model3dManager) {
                 this.model3dManager.setVisible(true);
                 this.model3dManager.setARMode(true);
-                
+
                 console.log('🔍 Intentando WebXR AR...');
                 xrOk = await this.model3dManager.startARSession();
             }
@@ -2224,7 +2325,7 @@ class VirtualAssistantApp {
                 if (this.ui.camera) this.ui.camera.style.display = 'none';
                 if (this.model3dManager) this.model3dManager.enableTapPlacement(false);
                 if (this.ui.arStatus) this.ui.arStatus.textContent = 'WebXR AR activo';
-                
+
                 // Mostrar mensaje de éxito
                 this.showARSuccessMessage();
             } else {
@@ -2238,7 +2339,7 @@ class VirtualAssistantApp {
                 }
                 // Fallback para Android y otros navegadores
                 console.log('🔄 WebXR no disponible, usando fallback...');
-                
+
                 let fallbackReason = 'Fallback AR';
                 if (isAndroid) {
                     if (isChrome) {
@@ -2251,7 +2352,7 @@ class VirtualAssistantApp {
                         fallbackReason = 'AR optimizado para Android';
                     }
                 }
-                
+
                 await this.setupFallbackAR(fallbackReason);
                 this.showARFallbackMessage(isAndroid, isChrome, isFirefox, isBrave);
             }
@@ -2276,13 +2377,13 @@ class VirtualAssistantApp {
 
     async setupFallbackAR(statusText) {
         console.log('Configurando AR con cámara HTML...');
-        
+
         // Crear e inicializar CameraManager si no existe
         if (!this.cameraManager) {
             console.log('Creando CameraManager...');
             this.cameraManager = new CameraManager();
         }
-        
+
         // Asegurar que la cámara esté iniciada
         if (!this.cameraManager.isInitialized) {
             console.log('Iniciando cámara para fallback...');
@@ -2294,24 +2395,24 @@ class VirtualAssistantApp {
                 // Continuar sin cámara
             }
         }
-        
+
         if (this.ui.camera) {
             this.ui.camera.style.display = 'block';
             console.log('Cámara HTML visible');
         }
-        
+
         if (this.model3dManager) {
             this.model3dManager.setVisible(true);
             this.model3dManager.setARMode(true); // Usar modo AR para fondo transparente
             this.model3dManager.enableTapPlacement(true);
             console.log('Modelo 3D configurado para fallback');
         }
-        
+
         if (this.ui.arStatus) this.ui.arStatus.textContent = statusText;
-        
+
         console.log('Fallback AR configurado completamente');
     }
-    
+
     showARSuccessMessage() {
         if (this.ui.arResponse) {
             this.ui.arResponse.innerHTML = `
@@ -2322,12 +2423,12 @@ class VirtualAssistantApp {
             `;
         }
     }
-    
+
     showARFallbackMessage(isAndroid, isChrome, isFirefox, isBrave) {
         if (this.ui.arResponse) {
             let message = '📱 Realidad Aumentada Activada';
             let instructions = 'Toca la pantalla para colocar el avatar en tu espacio.';
-            
+
             this.ui.arResponse.innerHTML = `
                 <div style="color: #4CAF50; font-size: 16px; margin-bottom: 10px;">
                     ${message}
@@ -2634,7 +2735,7 @@ class VirtualAssistantApp {
 
     async startVoiceInteraction(isAR = false) {
         if (this.isProcessing) return;
-        
+
         console.log('🎤 startVoiceInteraction llamado, isAR:', isAR);
         console.log('🔍 Estado del sistema:', {
             speechExists: !!this.speech,
@@ -2642,7 +2743,7 @@ class VirtualAssistantApp {
             isIOSSafari: this.speech?.isIOSSafari,
             unsupportedReason: this.speech?.unsupportedReason
         });
-        
+
         // Verificar que Speech esté inicializado
         if (!this.speech) {
             console.error('❌ Speech manager no existe');
@@ -2653,7 +2754,7 @@ class VirtualAssistantApp {
             const reason = this.speech.unsupportedReason || 'Reconocimiento de voz no disponible en este navegador o contexto.';
             console.error('❌ Speech no inicializado:', reason);
             this.updateChatStatus(`❌ ${reason}`);
-            
+
             // En iOS, mostrar sugerencias adicionales
             if (this.speech.isIOSSafari) {
                 setTimeout(() => {
@@ -2678,7 +2779,7 @@ class VirtualAssistantApp {
 
         try {
             console.log('🎤 Iniciando reconocimiento...');
-            
+
             // Mensaje específico para iOS con más información
             if (this.speech.isIOSSafari) {
                 if (this.speech.mediaRecorder) {
@@ -2700,7 +2801,7 @@ class VirtualAssistantApp {
 
             if (transcript && transcript.length > 1) {
                 console.log('👂 Reconocido:', transcript);
-                
+
                 // Verificar conexión con Gemini antes de procesar
                 if (!this.gemini.isInitialized) {
                     this.updateChatStatus('❌ Perdida conexión con Gemini. Reintentando...');
@@ -2713,11 +2814,11 @@ class VirtualAssistantApp {
                         return;
                     }
                 }
-                
+
                 await this.processMessage(transcript, isAR);
             } else {
                 console.log('🔍 No se obtuvo transcript válido');
-                
+
                 if (this.speech.isIOSSafari) {
                     // En iOS, dar más contexto sobre qué pasó
                     if (this.speech.mediaRecorder) {
@@ -2737,10 +2838,10 @@ class VirtualAssistantApp {
         } catch (error) {
             console.error('❌ Error voz completo:', error);
             console.error('❌ Stack trace:', error.stack);
-            
+
             let errorMessage = '❌ Error micrófono';
             let suggestion = '';
-            
+
             if (this.speech.isIOSSafari) {
                 // Errores específicos de iOS
                 if (error.name === 'NotAllowedError') {
@@ -2768,9 +2869,9 @@ class VirtualAssistantApp {
             } else {
                 errorMessage = `❌ Error micrófono: ${error.name || error.message || 'desconocido'}`;
             }
-            
+
             this.updateChatStatus(errorMessage);
-            
+
             // Mostrar sugerencia después de un momento
             if (suggestion) {
                 setTimeout(() => {
