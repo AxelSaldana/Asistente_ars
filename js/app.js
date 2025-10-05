@@ -681,10 +681,32 @@ class SpeechManager {
     }
 
     async transcribeAudioBlob(audioBlob) {
+        // MOSTRAR DEBUG EN PANTALLA PARA MÓVIL
+        const debugInfo = {
+            isIOSSafari: this.isIOSSafari,
+            gladiaApiKey: CONFIG.GLADIA.API_KEY,
+            apiKeyValid: CONFIG.GLADIA.API_KEY !== 'TU_GLADIA_API_KEY',
+            audioBlobSize: audioBlob.size,
+            audioBlobType: audioBlob.type
+        };
+        
+        console.log('🔍 DEBUGGING transcribeAudioBlob - Estado actual:', debugInfo);
+        this.showDebugAlert('🔍 DEBUG transcribeAudioBlob', JSON.stringify(debugInfo, null, 2));
+
         // 🍎 iOS Safari: Usar Gladia API para transcripción real
         if (this.isIOSSafari && CONFIG.GLADIA.API_KEY !== 'TU_GLADIA_API_KEY') {
-            console.log('🍎 iOS Safari: Usando Gladia API para transcripción...');
+            console.log('✅ iOS Safari: Condiciones cumplidas, intentando Gladia API...');
+            this.showDebugAlert('✅ GLADIA', 'iOS Safari: Intentando Gladia API...');
+            console.log('🔄 Llamando a transcribeWithGladia...');
             return await this.transcribeWithGladia(audioBlob);
+        } else {
+            const reason = {
+                isIOSSafari: this.isIOSSafari,
+                hasValidApiKey: CONFIG.GLADIA.API_KEY !== 'TU_GLADIA_API_KEY',
+                apiKeyValue: CONFIG.GLADIA.API_KEY.substring(0, 10) + '...'
+            };
+            console.log('❌ NO usando Gladia porque:', reason);
+            this.showDebugAlert('❌ NO GLADIA', JSON.stringify(reason, null, 2));
         }
 
         // Fallback experimental para otros casos
@@ -703,7 +725,18 @@ class SpeechManager {
 
     // ===== TRANSCRIPCIÓN CON GLADIA API (SOLO iOS/Safari) =====
     async transcribeWithGladia(audioBlob) {
+        console.log('🚀 ENTRANDO a transcribeWithGladia');
+        const blobDetails = {
+            size: audioBlob.size,
+            type: audioBlob.type,
+            gladiaEndpoint: CONFIG.GLADIA.ENDPOINT,
+            apiKeyLength: CONFIG.GLADIA.API_KEY.length
+        };
+        console.log('📊 Audio blob details:', blobDetails);
+        this.showDebugAlert('🚀 GLADIA START', JSON.stringify(blobDetails, null, 2));
+
         // Mostrar modal de progreso con opción de cancelar
+        console.log('📱 Mostrando modal de progreso Gladia...');
         const progressModal = this.showGladiaProgressModal();
         
         try {
@@ -774,6 +807,7 @@ class SpeechManager {
 
     // ===== MODAL DE PROGRESO GLADIA CON CANCELAR =====
     showGladiaProgressModal() {
+        console.log('🎭 Creando modal de progreso Gladia...');
         const modal = document.createElement('div');
         modal.style.cssText = `
             position: fixed;
@@ -892,6 +926,45 @@ class SpeechManager {
         };
 
         return findTranscript(result);
+    }
+
+    // ===== MOSTRAR DEBUG EN PANTALLA PARA MÓVIL =====
+    showDebugAlert(title, message) {
+        // Crear modal temporal para mostrar debug info
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 20000;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 2px solid #4CAF50;
+        `;
+        
+        modal.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <strong style="color: #4CAF50;">${title}</strong>
+                <button onclick="this.parentElement.parentElement.remove()" style="background: #f44336; color: white; border: none; border-radius: 3px; padding: 5px 10px; cursor: pointer;">✕</button>
+            </div>
+            <pre style="white-space: pre-wrap; margin: 0; font-size: 11px;">${message}</pre>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Auto-remover después de 8 segundos
+        setTimeout(() => {
+            if (modal.parentElement) {
+                modal.remove();
+            }
+        }, 8000);
     }
 
     async showManualInputFallback() {
