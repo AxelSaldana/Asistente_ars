@@ -254,18 +254,25 @@ class SpeechManager {
 
             // Verificar soporte de Speech Recognition
             const hasSpeechRecognition = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
-            this.showDebugAlert('🔍 SPEECH CHECK', JSON.stringify({
+            const speechInfo = {
                 hasSpeechRecognition,
                 hasWebkitSpeechRecognition: 'webkitSpeechRecognition' in window,
-                hasSpeechRecognition: 'SpeechRecognition' in window,
-                isIOSSafari: this.isIOSSafari
-            }, null, 2));
+                hasSpeechRecognitionNative: 'SpeechRecognition' in window,
+                isIOSSafari: this.isIOSSafari,
+                willUseIOSFallback: !hasSpeechRecognition && this.isIOSSafari
+            };
+            
+            console.log('🔍 Speech Recognition Check:', speechInfo);
+            this.showDebugAlert('🔍 SPEECH CHECK', JSON.stringify(speechInfo, null, 2));
 
             if (!hasSpeechRecognition) {
                 if (this.isIOSSafari) {
                     console.warn('🍎 Safari en iOS no soporta Web Speech API, usando fallback con MediaRecorder');
                     this.showDebugAlert('🍎 NO SPEECH API', 'Llamando a initIOSFallback...');
-                    return await this.initIOSFallback();
+                    
+                    const result = await this.initIOSFallback();
+                    this.showDebugAlert('🔄 INIT RESULT', `initIOSFallback returned: ${result}`);
+                    return result;
                 } else {
                     this.showDebugAlert('❌ NO SPEECH API', 'Navegador no soportado');
                     this.unsupportedReason = 'Este navegador no soporta reconocimiento de voz. Usa Chrome/Edge en escritorio.';
@@ -363,7 +370,9 @@ class SpeechManager {
                 this.showDebugAlert('⚠️ NO MediaRecorder', 'Usando input file capture para iOS...');
                 
                 // Configurar input file capture para iOS Safari
-                return await this.initFileCaptureFallback();
+                const fileCaptureResult = await this.initFileCaptureFallback();
+                this.showDebugAlert('📁 FILE RESULT', `initFileCaptureFallback returned: ${fileCaptureResult}`);
+                return fileCaptureResult;
             }
             
             this.showDebugAlert('✅ MediaRecorder OK', 'MediaRecorder disponible, solicitando permisos...');
