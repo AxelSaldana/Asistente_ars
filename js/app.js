@@ -194,19 +194,30 @@ class SpeechManager {
         this.isInitialized = false;
         this.unsupportedReason = '';
         this.lastError = '';
-        // Detección de iOS/Safari
-        this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-        this.isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-        this.isIOSSafari = this.isIOS && this.isSafari;
+        // Detección de iOS/Safari MEJORADA
+        this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+                     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPad en modo desktop
+        
+        // Detección más amplia de Safari en iOS
+        this.isSafari = /Safari/.test(navigator.userAgent) && 
+                        !/Chrome|CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+        
+        // También considerar WebView en iOS
+        this.isIOSWebView = this.isIOS && !this.isSafari;
+        this.isIOSSafari = this.isIOS && (this.isSafari || this.isIOSWebView);
         
         // DEBUG: Mostrar detección en pantalla
         setTimeout(() => {
             this.showDebugAlert('🔍 DEVICE DETECTION', JSON.stringify({
                 userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                maxTouchPoints: navigator.maxTouchPoints,
                 isIOS: this.isIOS,
                 isSafari: this.isSafari,
+                isIOSWebView: this.isIOSWebView,
                 isIOSSafari: this.isIOSSafari,
-                hasMediaRecorder: 'MediaRecorder' in window
+                hasMediaRecorder: 'MediaRecorder' in window,
+                hasWebkitSpeechRecognition: 'webkitSpeechRecognition' in window
             }, null, 2));
         }, 1000);
         
