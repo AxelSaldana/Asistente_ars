@@ -521,15 +521,19 @@ class SpeechManager {
     }
 
     async listen() {
+        this.showDebugAlert('🎤 LISTEN START', `isListening: ${this.isListening}, isIOSSafari: ${this.isIOSSafari}`);
+        
         if (this.isListening) return null;
 
         // Si estamos en iOS Safari, decidir el mejor método
         if (this.isIOSSafari) {
             if (this.mediaRecorder) {
                 console.log('🍎 iOS: Intentando grabación con MediaRecorder...');
+                this.showDebugAlert('🍎 iOS PATH', 'Usando MediaRecorder...');
                 return await this.listenIOSFallback();
             } else {
                 console.log('🍎 iOS: Usando entrada manual directa');
+                this.showDebugAlert('🍎 iOS PATH', 'Entrada manual directa...');
                 return await this.showManualInputFallback();
             }
         }
@@ -617,9 +621,11 @@ class SpeechManager {
 
     async listenIOSFallback() {
         console.log('Usando transcripción web para iOS...');
+        this.showDebugAlert('🍎 iOS FALLBACK', 'Iniciando listenIOSFallback...');
 
         if (!this.mediaRecorder || !this.stream) {
             console.error('❌ MediaRecorder no configurado');
+            this.showDebugAlert('❌ ERROR', 'MediaRecorder no configurado');
             return null;
         }
 
@@ -636,12 +642,14 @@ class SpeechManager {
             this.mediaRecorder.onstop = async () => {
                 clearTimeout(timeout);
                 this.isListening = false;
+                this.showDebugAlert('🛑 RECORDING STOP', `audioChunks: ${this.audioChunks.length}`);
 
                 if (this.audioChunks.length > 0) {
                     try {
                         // Crear blob de audio
                         const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
                         console.log('🎤 Audio capturado:', audioBlob.size, 'bytes');
+                        this.showDebugAlert('🎤 AUDIO BLOB', `Size: ${audioBlob.size} bytes, Type: ${audioBlob.type}`);
 
                         // Intentar transcripción con Web Speech API si está disponible
                         const transcript = await this.transcribeAudioBlob(audioBlob);
@@ -654,9 +662,11 @@ class SpeechManager {
                         }
                     } catch (error) {
                         console.error('❌ Error procesando audio:', error);
+                        this.showDebugAlert('❌ AUDIO ERROR', error.message);
                         resolve(await this.showManualInputFallback());
                     }
                 } else {
+                    this.showDebugAlert('❌ NO AUDIO', 'Sin chunks de audio');
                     resolve(null);
                 }
             };
