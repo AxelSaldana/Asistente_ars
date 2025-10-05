@@ -703,6 +703,9 @@ class SpeechManager {
 
     // ===== TRANSCRIPCIÓN CON GLADIA API (SOLO iOS/Safari) =====
     async transcribeWithGladia(audioBlob) {
+        // Mostrar modal de progreso con opción de cancelar
+        const progressModal = this.showGladiaProgressModal();
+        
         try {
             console.log('🔄 Enviando audio a Gladia API...', audioBlob.size, 'bytes');
 
@@ -715,6 +718,11 @@ class SpeechManager {
             // Configurar petición con timeout
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 segundos
+            
+            // Permitir cancelar desde el modal
+            progressModal.onCancel = () => {
+                controller.abort();
+            };
 
             const response = await fetch(CONFIG.GLADIA.ENDPOINT, {
                 method: 'POST',
@@ -727,6 +735,7 @@ class SpeechManager {
             });
 
             clearTimeout(timeoutId);
+            progressModal.close();
 
             if (!response.ok) {
                 const errorText = await response.text();
@@ -749,15 +758,102 @@ class SpeechManager {
             return transcription.trim();
 
         } catch (error) {
+            progressModal.close();
             console.error('❌ Error en Gladia API:', error);
 
             if (error.name === 'AbortError') {
-                console.warn('⏰ Timeout: Gladia tardó demasiado en responder');
+                console.warn('⏰ Usuario canceló o timeout en Gladia');
+                // Si el usuario canceló, mostrar directamente entrada manual
+                return await this.showManualInputFallback();
             }
 
-            // Retornar null para usar fallback manual
+            // Para otros errores, retornar null para usar fallback manual
             return null;
         }
+    }
+
+    // ===== MODAL DE PROGRESO GLADIA CON CANCELAR =====
+    showGladiaProgressModal() {
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        `;
+
+        const content = document.createElement('div');
+        content.style.cssText = `
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 90%;
+            width: 400px;
+            text-align: center;
+            color: white;
+        `;
+
+        content.innerHTML = `
+            <div style="margin-bottom: 20px;">
+                <div style="width: 40px; height: 40px; border: 4px solid #333; border-top: 4px solid #4CAF50; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px;"></div>
+                <h3 style="color: #fff; margin-bottom: 10px;">🤖 Transcribiendo con IA</h3>
+                <p style="color: #ccc; margin-bottom: 20px;">Procesando tu audio con Gladia...</p>
+                <div style="background: rgba(76,175,80,0.1); padding: 10px; border-radius: 8px; margin-bottom: 20px;">
+                    <p style="color: #4CAF50; font-size: 14px; margin: 0;">
+                        ⚡ Transcripción automática en progreso
+                    </p>
+                </div>
+            </div>
+            <div>
+                <button id="gladiaCancel" style="background: #f44336; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; margin-right: 10px;">Cancelar</button>
+                <button id="gladiaManual" style="background: #2196F3; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px;">Escribir Manualmente</button>
+            </div>
+            <style>
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+            </style>
+        `;
+
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+
+        const cancelBtn = content.querySelector('#gladiaCancel');
+        const manualBtn = content.querySelector('#gladiaManual');
+
+        let onCancel = null;
+        let closed = false;
+
+        const cleanup = () => {
+            if (!closed) {
+                closed = true;
+                document.body.removeChild(modal);
+            }
+        };
+
+        cancelBtn.onclick = () => {
+            cleanup();
+            if (onCancel) onCancel();
+        };
+
+        manualBtn.onclick = () => {
+            cleanup();
+            if (onCancel) onCancel(); // Esto activará el fallback manual
+        };
+
+        return {
+            close: cleanup,
+            set onCancel(callback) {
+                onCancel = callback;
+            }
+        };
     }
 
     // ===== EXTRAER TRANSCRIPCIÓN DE RESPUESTA GLADIA =====
