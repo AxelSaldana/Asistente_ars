@@ -333,10 +333,12 @@ class SpeechManager {
     async initIOSFallback() {
         try {
             console.log('🍎 Configurando fallback optimizado para iOS Safari...');
+            this.showDebugAlert('🍎 INIT iOS', 'Iniciando initIOSFallback...');
 
             // Verificar contexto seguro primero
             if (!window.isSecureContext) {
                 console.error('❌ iOS requiere contexto seguro (HTTPS)');
+                this.showDebugAlert('❌ NO HTTPS', 'iOS requiere HTTPS');
                 this.unsupportedReason = 'iOS Safari requiere HTTPS para usar el micrófono.';
                 return false;
             }
@@ -344,12 +346,16 @@ class SpeechManager {
             // Verificar MediaRecorder support
             if (!('MediaRecorder' in window)) {
                 console.warn('❌ MediaRecorder no disponible, usando entrada manual directa');
+                this.showDebugAlert('❌ NO MediaRecorder', 'MediaRecorder no disponible en window');
                 this.unsupportedReason = 'iOS Safari: usará entrada manual para comandos de voz.';
                 // Aún así, configurar síntesis de voz
                 await this.setupSpeechSynthesis();
                 this.isInitialized = true;
+                console.log('✅ Modo entrada manual configurado para iOS');
                 return true;
             }
+            
+            this.showDebugAlert('✅ MediaRecorder OK', 'MediaRecorder disponible, solicitando permisos...');
 
             // Solicitar permisos específicos para iOS con configuración optimizada y timeout
             console.log('🎤 Solicitando permisos específicos para iOS...');
