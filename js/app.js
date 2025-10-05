@@ -77,36 +77,52 @@ class GeminiClient {
     async sendDirectToGemini(message) {
         const url = `${this.baseURL}/${this.model}:generateContent?key=${this.apiKey}`;
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: message }] }],
-                generationConfig: {
-                    temperature: CONFIG.GEMINI.TEMPERATURE,
-                    maxOutputTokens: CONFIG.GEMINI.MAX_TOKENS
-                }
-            })
-        });
+        // Crear AbortController para timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos timeout
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Error ${response.status}: ${errorText}`);
-        }
-
-        const data = await response.json();
-
-        if (data.candidates && data.candidates.length > 0) {
-            const content = data.candidates[0].content;
-            if (content && content.parts && content.parts.length > 0) {
-                return content.parts[0].text.trim();
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: message }] }],
+                    generationConfig: {
+                        temperature: CONFIG.GEMINI.TEMPERATURE,
+                        maxOutputTokens: CONFIG.GEMINI.MAX_TOKENS
+                    }
+                }),
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Error ${response.status}: ${errorText}`);
             }
-        }
 
-        throw new Error('Respuesta inválida');
+            const data = await response.json();
+
+            if (data.candidates && data.candidates.length > 0) {
+                const content = data.candidates[0].content;
+                if (content && content.parts && content.parts.length > 0) {
+                    return content.parts[0].text.trim();
+                }
+            }
+
+            throw new Error('Respuesta inválida');
+            
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error.name === 'AbortError') {
+                throw new Error('Timeout: Gemini tardó demasiado en responder');
+            }
+            throw error;
+        }
     }
 
-    async sendMessage(message) {
+    async sendMessage(message, retryCount = 0) {
         if (!this.isInitialized) {
             throw new Error('Gemini 2.0 no conectado');
         }
@@ -127,6 +143,12 @@ Avatar:`;
             return response;
 
         } catch (error) {
+            // Reintentar hasta 2 veces en caso de error de red o timeout
+            if (retryCount < 2 && (error.message.includes('Timeout') || error.message.includes('network') || error.message.includes('fetch'))) {
+                console.log(`🔄 Reintentando Gemini (${retryCount + 1}/2)...`);
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Esperar 1 segundo
+                return this.sendMessage(message, retryCount + 1);
+            }
             throw error;
         }
     }
@@ -185,8 +207,17 @@ class SpeechManager {
                 isIOS: this.isIOS,
                 isSafari: this.isSafari,
                 isIOSSafari: this.isIOSSafari,
-                userAgent: navigator.userAgent
+                userAgent: navigator.userAgent,
+                isSecureContext: window.isSecureContext,
+                protocol: window.location.protocol
             });
+
+            // Verificar contexto seguro (HTTPS) especialmente importante para iOS
+            if (!window.isSecureContext && this.isIOSSafari) {
+                console.error('❌ iOS requiere HTTPS para acceso al micrófono');
+                this.unsupportedReason = 'iOS Safari requiere HTTPS para usar el micrófono. Accede desde https://';
+                return false;
+            }
 
             // Verificar soporte de Speech Recognition
             const hasSpeechRecognition = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
@@ -201,19 +232,52 @@ class SpeechManager {
                 }
             }
 
-            // Solicitar permiso de micrófono explícito
+            // Solicitar permiso de micrófono explícito con mejor manejo para iOS
             try {
                 console.log('🎤 Solicitando permisos de micrófono...');
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // Configuración específica para iOS
+                const constraints = this.isIOSSafari ? {
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: { ideal: 16000 },
+                        channelCount: { ideal: 1 }
+                    }
+                } : { audio: true };
+                
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
                 console.log('✅ Permisos de micrófono concedidos');
-                stream.getTracks().forEach(track => track.stop());
-            } catch (e) {
-                console.warn('⚠️ Error al solicitar permisos:', e?.name || e);
-                if (this.isIOSSafari) {
-                    this.unsupportedReason = 'En iOS Safari, permite el acceso al micrófono cuando se solicite.';
-                } else {
-                    this.unsupportedReason = 'Acceso al micrófono denegado. Permite el acceso en la configuración del navegador.';
+                
+                // Verificar que el stream tiene tracks de audio activos
+                const audioTracks = stream.getAudioTracks();
+                if (audioTracks.length === 0) {
+                    throw new Error('No se obtuvieron tracks de audio');
                 }
+                
+                console.log('🎤 Tracks de audio:', audioTracks.length, 'Estado:', audioTracks[0].readyState);
+                stream.getTracks().forEach(track => track.stop());
+                
+            } catch (e) {
+                console.error('❌ Error al solicitar permisos:', e);
+                
+                let errorMessage = 'Acceso al micrófono denegado.';
+                if (this.isIOSSafari) {
+                    if (e.name === 'NotAllowedError') {
+                        errorMessage = '🍎 iOS Safari: Permite el acceso al micrófono en la configuración del navegador.';
+                    } else if (e.name === 'NotFoundError') {
+                        errorMessage = '🍎 iOS Safari: No se encontró micrófono disponible.';
+                    } else if (e.name === 'NotSupportedError') {
+                        errorMessage = '🍎 iOS Safari: Micrófono no soportado en este contexto.';
+                    } else {
+                        errorMessage = `🍎 iOS Safari: Error de micrófono (${e.name || 'desconocido'})`;
+                    }
+                } else {
+                    errorMessage = `Acceso al micrófono denegado: ${e.name || e.message || 'desconocido'}`;
+                }
+                
+                this.unsupportedReason = errorMessage;
                 return false;
             }
 
@@ -241,44 +305,128 @@ class SpeechManager {
 
     async initIOSFallback() {
         try {
-            console.log('Configurando fallback para iOS Safari...');
+            console.log('🍎 Configurando fallback optimizado para iOS Safari...');
+            
+            // Verificar contexto seguro primero
+            if (!window.isSecureContext) {
+                console.error('❌ iOS requiere contexto seguro (HTTPS)');
+                this.unsupportedReason = 'iOS Safari requiere HTTPS para usar el micrófono.';
+                return false;
+            }
             
             // Verificar MediaRecorder support
             if (!('MediaRecorder' in window)) {
-                this.unsupportedReason = 'Tu dispositivo iOS no soporta grabación de audio web.';
-                return false;
+                console.warn('❌ MediaRecorder no disponible, usando entrada manual directa');
+                this.unsupportedReason = 'iOS Safari: usará entrada manual para comandos de voz.';
+                // Aún así, configurar síntesis de voz
+                await this.setupSpeechSynthesis();
+                this.isInitialized = true;
+                return true;
             }
 
-            // Solicitar permisos específicos para iOS
-            const stream = await navigator.mediaDevices.getUserMedia({ 
+            // Solicitar permisos específicos para iOS con configuración optimizada y timeout
+            console.log('🎤 Solicitando permisos específicos para iOS...');
+            
+            const permissionTimeout = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Timeout solicitando permisos')), 10000);
+            });
+            
+            const getUserMediaPromise = navigator.mediaDevices.getUserMedia({ 
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
-                    autoGainControl: true
+                    autoGainControl: true,
+                    sampleRate: { ideal: 16000, min: 8000, max: 48000 },
+                    channelCount: { ideal: 1, min: 1, max: 2 }
                 }
             });
             
-            this.stream = stream;
-            console.log('✅ Permisos de audio concedidos en iOS');
+            const stream = await Promise.race([getUserMediaPromise, permissionTimeout]);
             
-            // Configurar MediaRecorder
-            this.mediaRecorder = new MediaRecorder(stream);
+            // Verificar que el stream es válido
+            if (!stream || stream.getAudioTracks().length === 0) {
+                throw new Error('Stream de audio inválido');
+            }
+            
+            this.stream = stream;
+            console.log('✅ Permisos de audio concedidos en iOS con configuración optimizada');
+            console.log('🎤 Audio tracks:', stream.getAudioTracks().length, 'Estado:', stream.getAudioTracks()[0].readyState);
+            
+            // Configurar MediaRecorder con formato compatible con iOS - Mejorado
+            let options = {};
+            const supportedTypes = ['audio/mp4', 'audio/webm', 'audio/wav', 'audio/ogg'];
+            
+            for (const type of supportedTypes) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    options.mimeType = type;
+                    console.log(`✅ Usando formato soportado: ${type}`);
+                    break;
+                }
+            }
+            
+            if (!options.mimeType) {
+                console.log('🔄 Usando formato por defecto del navegador (sin especificar)');
+            }
+            
+            try {
+                this.mediaRecorder = new MediaRecorder(stream, options);
+                console.log('🎤 MediaRecorder configurado exitosamente con:', options.mimeType || 'formato por defecto');
+                
+                // Verificar que MediaRecorder está en estado correcto
+                if (this.mediaRecorder.state !== 'inactive') {
+                    console.warn('⚠️ MediaRecorder no está en estado inactive:', this.mediaRecorder.state);
+                }
+                
+            } catch (mediaRecorderError) {
+                console.error('❌ Error creando MediaRecorder:', mediaRecorderError);
+                throw new Error(`MediaRecorder falló: ${mediaRecorderError.message}`);
+            }
             
             this.mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
                     this.audioChunks.push(event.data);
+                    console.log('📊 Chunk de audio recibido:', event.data.size, 'bytes');
                 }
             };
 
             await this.setupSpeechSynthesis();
             this.isInitialized = true;
-            console.log('Fallback iOS configurado correctamente');
+            console.log('✅ Fallback iOS configurado correctamente con MediaRecorder');
             return true;
             
         } catch (error) {
             console.error('❌ Error configurando fallback iOS:', error);
-            this.unsupportedReason = 'No se pudo acceder al micrófono en iOS. Asegúrate de permitir el acceso cuando se solicite.';
-            return false;
+            
+            // Diagnóstico específico del error
+            let specificError = 'Error desconocido';
+            if (error.name === 'NotAllowedError') {
+                specificError = 'Permisos de micrófono denegados';
+            } else if (error.name === 'NotFoundError') {
+                specificError = 'Micrófono no encontrado';
+            } else if (error.name === 'NotSupportedError') {
+                specificError = 'Micrófono no soportado';
+            } else if (error.message.includes('Timeout')) {
+                specificError = 'Timeout solicitando permisos';
+            } else if (error.message.includes('MediaRecorder')) {
+                specificError = 'Error configurando MediaRecorder';
+            }
+            
+            console.log(`🔍 Error específico: ${specificError}`);
+            
+            // Fallback del fallback: solo entrada manual
+            console.log('🔄 Configurando modo de entrada manual únicamente para iOS');
+            this.unsupportedReason = `iOS Safari: ${specificError}. Usará entrada manual para comandos de voz.`;
+            
+            try {
+                await this.setupSpeechSynthesis();
+                this.isInitialized = true;
+                console.log('✅ Modo entrada manual configurado para iOS');
+                return true;
+            } catch (synthError) {
+                console.error('❌ Error configurando síntesis en iOS:', synthError);
+                this.unsupportedReason = 'iOS Safari: funcionalidad de voz limitada.';
+                return false;
+            }
         }
     }
 
@@ -371,9 +519,15 @@ class SpeechManager {
     async listen() {
         if (this.isListening) return null;
 
-        // Si estamos en iOS Safari, usar el fallback
-        if (this.isIOSSafari && this.mediaRecorder) {
-            return await this.listenIOSFallback();
+        // Si estamos en iOS Safari, decidir el mejor método
+        if (this.isIOSSafari) {
+            if (this.mediaRecorder) {
+                console.log('🍎 iOS: Intentando grabación con MediaRecorder...');
+                return await this.listenIOSFallback();
+            } else {
+                console.log('🍎 iOS: Usando entrada manual directa');
+                return await this.showManualInputFallback();
+            }
         }
 
         // Usar Web Speech API en navegadores compatibles
@@ -570,14 +724,26 @@ class SpeechManager {
                 text-align: center;
             `;
             
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+            const title = isIOS ? '🍎 Comando de Voz (iOS)' : '🎤 Comando de Voz';
+            const description = isIOS ? 
+                'En iOS Safari, escribe tu comando directamente:' : 
+                'Audio grabado. Escribe lo que dijiste:';
+            
             content.innerHTML = `
-                <h3 style="color: #fff; margin-bottom: 15px;">🎤 Comando de Voz</h3>
-                <p style="color: #ccc; margin-bottom: 15px;">Audio grabado. Escribe lo que dijiste:</p>
-                <input type="text" id="voiceInput" placeholder="Escribe tu comando aquí..." 
-                       style="width: 100%; padding: 10px; border: none; border-radius: 5px; margin-bottom: 15px; font-size: 16px;">
+                <h3 style="color: #fff; margin-bottom: 15px;">${title}</h3>
+                <p style="color: #ccc; margin-bottom: 15px;">${description}</p>
+                <input type="text" id="voiceInput" placeholder="Ejemplo: Hola, ¿cómo estás?" 
+                       style="width: 100%; padding: 12px; border: none; border-radius: 8px; margin-bottom: 15px; font-size: 16px; box-sizing: border-box;">
+                <div style="margin-bottom: 15px; color: #aaa; font-size: 13px; line-height: 1.4;">
+                    💡 Sugerencias:<br>
+                    • "Cuéntame un chiste"<br>
+                    • "¿Qué tiempo hace hoy?"<br>
+                    • "Explica qué es la inteligencia artificial"
+                </div>
                 <div>
-                    <button id="voiceOk" style="background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 5px; margin-right: 10px; cursor: pointer;">Enviar</button>
-                    <button id="voiceCancel" style="background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">Cancelar</button>
+                    <button id="voiceOk" style="background: #4CAF50; color: white; border: none; padding: 12px 24px; border-radius: 8px; margin-right: 10px; cursor: pointer; font-size: 14px;">Enviar a Gemini</button>
+                    <button id="voiceCancel" style="background: #f44336; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px;">Cancelar</button>
                 </div>
             `;
             
@@ -2468,22 +2634,58 @@ class VirtualAssistantApp {
 
     async startVoiceInteraction(isAR = false) {
         if (this.isProcessing) return;
+        
+        console.log('🎤 startVoiceInteraction llamado, isAR:', isAR);
+        console.log('🔍 Estado del sistema:', {
+            speechExists: !!this.speech,
+            speechInitialized: this.speech?.isInitialized,
+            isIOSSafari: this.speech?.isIOSSafari,
+            unsupportedReason: this.speech?.unsupportedReason
+        });
+        
+        // Verificar que Speech esté inicializado
         if (!this.speech) {
+            console.error('❌ Speech manager no existe');
             this.updateChatStatus('❌ Voz no inicializada');
             return;
         }
         if (!this.speech.isInitialized) {
             const reason = this.speech.unsupportedReason || 'Reconocimiento de voz no disponible en este navegador o contexto.';
+            console.error('❌ Speech no inicializado:', reason);
             this.updateChatStatus(`❌ ${reason}`);
             
+            // En iOS, mostrar sugerencias adicionales
+            if (this.speech.isIOSSafari) {
+                setTimeout(() => {
+                    this.updateChatStatus('🍎 Sugerencia iOS: Asegúrate de estar en HTTPS y permitir micrófono');
+                }, 2000);
+            }
             return;
+        }
+
+        // Verificar que Gemini esté conectado ANTES de iniciar el reconocimiento
+        if (!this.gemini || !this.gemini.isInitialized) {
+            this.updateChatStatus('❌ Gemini no está conectado. Reintentando...');
+            try {
+                await this.gemini.init();
+                console.log('✅ Gemini reconectado exitosamente');
+            } catch (error) {
+                console.error('❌ Error reconectando Gemini:', error);
+                this.updateChatStatus('❌ No se pudo conectar con Gemini. Verifica tu conexión.');
+                return;
+            }
         }
 
         try {
             console.log('🎤 Iniciando reconocimiento...');
             
+            // Mensaje específico para iOS con más información
             if (this.speech.isIOSSafari) {
-                this.updateChatStatus('🎤 Escuchando...');
+                if (this.speech.mediaRecorder) {
+                    this.updateChatStatus('🍎 iOS: Grabando audio... (4 segundos)');
+                } else {
+                    this.updateChatStatus('🍎 iOS: Preparando entrada manual...');
+                }
             } else {
                 this.updateChatStatus('🎤 Habla ahora...');
             }
@@ -2492,14 +2694,37 @@ class VirtualAssistantApp {
                 this.model3dManager.playListeningAnimation();
             }
 
+            console.log('🔍 Llamando a speech.listen()...');
             const transcript = await this.speech.listen();
+            console.log('🔍 speech.listen() retornó:', transcript);
 
             if (transcript && transcript.length > 1) {
                 console.log('👂 Reconocido:', transcript);
+                
+                // Verificar conexión con Gemini antes de procesar
+                if (!this.gemini.isInitialized) {
+                    this.updateChatStatus('❌ Perdida conexión con Gemini. Reintentando...');
+                    try {
+                        await this.gemini.init();
+                        console.log('✅ Gemini reconectado para procesar mensaje');
+                    } catch (geminiError) {
+                        console.error('❌ Error reconectando Gemini:', geminiError);
+                        this.updateChatStatus('❌ No se pudo reconectar con Gemini');
+                        return;
+                    }
+                }
+                
                 await this.processMessage(transcript, isAR);
             } else {
+                console.log('🔍 No se obtuvo transcript válido');
+                
                 if (this.speech.isIOSSafari) {
-                    this.updateChatStatus('🍎 Listo para tu comando');
+                    // En iOS, dar más contexto sobre qué pasó
+                    if (this.speech.mediaRecorder) {
+                        this.updateChatStatus('🍎 iOS: No se detectó audio. Intenta hablar más fuerte.');
+                    } else {
+                        this.updateChatStatus('🍎 iOS: Listo para entrada manual');
+                    }
                 } else {
                     this.updateChatStatus('🤷 No se detectó voz');
                 }
@@ -2510,12 +2735,47 @@ class VirtualAssistantApp {
             }
 
         } catch (error) {
-            console.error('❌ Error voz:', error);
+            console.error('❌ Error voz completo:', error);
+            console.error('❌ Stack trace:', error.stack);
+            
+            let errorMessage = '❌ Error micrófono';
+            let suggestion = '';
             
             if (this.speech.isIOSSafari) {
-                this.updateChatStatus('❌ Error de audio - Intenta de nuevo');
+                // Errores específicos de iOS
+                if (error.name === 'NotAllowedError') {
+                    errorMessage = '❌ iOS: Permisos de micrófono denegados';
+                    suggestion = '📱 Ve a Configuración > Safari > Micrófono y permite el acceso';
+                } else if (error.name === 'NotFoundError') {
+                    errorMessage = '❌ iOS: Micrófono no encontrado';
+                    suggestion = '📱 Verifica que tu dispositivo tenga micrófono';
+                } else if (error.message && error.message.includes('HTTPS')) {
+                    errorMessage = '❌ iOS: Requiere conexión segura';
+                    suggestion = '🔒 Accede desde https:// en lugar de http://';
+                } else if (error.message && error.message.includes('MediaRecorder')) {
+                    errorMessage = '❌ iOS: Error de grabación';
+                    suggestion = '🔄 Intentará entrada manual';
+                } else {
+                    errorMessage = '❌ iOS: Error de audio - Intenta de nuevo';
+                    suggestion = '🍎 Asegúrate de estar en Safari actualizado';
+                }
+            } else if (error.message && error.message.includes('Gemini')) {
+                errorMessage = '❌ Error de conexión con Gemini';
+                suggestion = '🌐 Verifica tu conexión a internet';
+            } else if (error.message && error.message.includes('network')) {
+                errorMessage = '❌ Error de red - Verifica tu conexión';
+                suggestion = '🌐 Revisa tu conexión a internet';
             } else {
-                this.updateChatStatus('❌ Error micrófono');
+                errorMessage = `❌ Error micrófono: ${error.name || error.message || 'desconocido'}`;
+            }
+            
+            this.updateChatStatus(errorMessage);
+            
+            // Mostrar sugerencia después de un momento
+            if (suggestion) {
+                setTimeout(() => {
+                    this.updateChatStatus(suggestion);
+                }, 2000);
             }
 
             if ((this.isInPreview || this.isInAR) && this.model3dManager) {
