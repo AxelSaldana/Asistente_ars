@@ -176,6 +176,10 @@ class SpeechManager {
         this.mediaRecorder = null;
         this.audioChunks = [];
         this.stream = null;
+        // Estado específico para iOS TTS
+        this.iosTTSActivated = false;
+        this.iosTTSReady = false;
+        this.pendingSpeech = null;
     }
 
     async init() {
@@ -185,8 +189,16 @@ class SpeechManager {
                 isIOS: this.isIOS,
                 isSafari: this.isSafari,
                 isIOSSafari: this.isIOSSafari,
+                isSecureContext: window.isSecureContext,
+                protocol: window.location.protocol,
                 userAgent: navigator.userAgent
             });
+
+            // Verificar contexto seguro para iOS
+            if (this.isIOSSafari && !window.isSecureContext) {
+                this.unsupportedReason = 'iOS Safari requiere HTTPS para funciones de voz. Usa una conexión segura.';
+                return false;
+            }
 
             // Verificar soporte de Speech Recognition
             const hasSpeechRecognition = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
@@ -201,16 +213,42 @@ class SpeechManager {
                 }
             }
 
-            // Solicitar permiso de micrófono explícito
+            // Solicitar permiso de micrófono explícito con timeout para iOS
             try {
                 console.log('🎤 Solicitando permisos de micrófono...');
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const constraints = this.isIOSSafari ? {
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: { ideal: 16000 },
+                        channelCount: { ideal: 1 }
+                    }
+                } : { audio: true };
+
+                const permissionTimeout = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Timeout solicitando permisos')), 10000);
+                });
+
+                const stream = await Promise.race([
+                    navigator.mediaDevices.getUserMedia(constraints),
+                    permissionTimeout
+                ]);
+                
                 console.log('✅ Permisos de micrófono concedidos');
                 stream.getTracks().forEach(track => track.stop());
             } catch (e) {
-                console.warn('⚠️ Error al solicitar permisos:', e?.name || e);
+                console.warn('⚠️ Error al solicitar permisos:', e?.name || e?.message || e);
                 if (this.isIOSSafari) {
-                    this.unsupportedReason = 'En iOS Safari, permite el acceso al micrófono cuando se solicite.';
+                    if (e?.name === 'NotAllowedError') {
+                        this.unsupportedReason = 'Acceso al micrófono denegado. En iOS Safari, toca "Permitir" cuando se solicite acceso.';
+                    } else if (e?.name === 'NotFoundError') {
+                        this.unsupportedReason = 'No se encontró micrófono. Verifica que tu dispositivo tenga micrófono disponible.';
+                    } else if (e?.message?.includes('Timeout')) {
+                        this.unsupportedReason = 'Timeout solicitando permisos. Intenta nuevamente y permite el acceso rápidamente.';
+                    } else {
+                        this.unsupportedReason = 'Error de micrófono en iOS Safari. Verifica permisos en Configuración > Safari > Micrófono.';
+                    }
                 } else {
                     this.unsupportedReason = 'Acceso al micrófono denegado. Permite el acceso en la configuración del navegador.';
                 }
@@ -224,6 +262,12 @@ class SpeechManager {
             try {
                 await this.setupSpeechSynthesis();
                 console.log('🔧 Speech Synthesis configurado');
+                
+                // Configuración específica para iOS TTS
+                if (this.isIOSSafari) {
+                    console.log('🍎 Configurando TTS específico para iOS Safari...');
+                    await this.setupIOSSpeechSynthesis();
+                }
             } catch (synthError) {
                 console.warn('⚠️ Error en Speech Synthesis, continuando sin TTS:', synthError);
                 // Continuar sin síntesis de voz
@@ -243,26 +287,54 @@ class SpeechManager {
         try {
             console.log('Configurando fallback para iOS Safari...');
             
+            // Verificar contexto seguro
+            if (!window.isSecureContext) {
+                this.unsupportedReason = 'iOS Safari requiere HTTPS para acceso al micrófono.';
+                return false;
+            }
+            
             // Verificar MediaRecorder support
             if (!('MediaRecorder' in window)) {
                 this.unsupportedReason = 'Tu dispositivo iOS no soporta grabación de audio web.';
                 return false;
             }
 
-            // Solicitar permisos específicos para iOS
-            const stream = await navigator.mediaDevices.getUserMedia({ 
+            // Solicitar permisos específicos para iOS con timeout
+            const constraints = {
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
-                    autoGainControl: true
+                    autoGainControl: true,
+                    sampleRate: { ideal: 16000 },
+                    channelCount: { ideal: 1 }
                 }
+            };
+
+            const permissionTimeout = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Timeout solicitando permisos')), 10000);
             });
+
+            const stream = await Promise.race([
+                navigator.mediaDevices.getUserMedia(constraints),
+                permissionTimeout
+            ]);
             
             this.stream = stream;
             console.log('✅ Permisos de audio concedidos en iOS');
             
-            // Configurar MediaRecorder
-            this.mediaRecorder = new MediaRecorder(stream);
+            // Configurar MediaRecorder con detección de formato
+            const supportedTypes = ['audio/mp4', 'audio/webm', 'audio/wav', 'audio/ogg'];
+            let options = {};
+            
+            for (const type of supportedTypes) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    options.mimeType = type;
+                    console.log('🎧 Formato de audio seleccionado:', type);
+                    break;
+                }
+            }
+            
+            this.mediaRecorder = new MediaRecorder(stream, options);
             
             this.mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
@@ -271,13 +343,26 @@ class SpeechManager {
             };
 
             await this.setupSpeechSynthesis();
+            
+            // Configuración específica para iOS TTS
+            console.log('🍎 Configurando TTS específico para iOS Safari...');
+            await this.setupIOSSpeechSynthesis();
+            
             this.isInitialized = true;
             console.log('Fallback iOS configurado correctamente');
             return true;
             
         } catch (error) {
             console.error('❌ Error configurando fallback iOS:', error);
-            this.unsupportedReason = 'No se pudo acceder al micrófono en iOS. Asegúrate de permitir el acceso cuando se solicite.';
+            if (error?.name === 'NotAllowedError') {
+                this.unsupportedReason = 'Acceso al micrófono denegado. En iOS Safari, toca "Permitir" cuando se solicite.';
+            } else if (error?.name === 'NotFoundError') {
+                this.unsupportedReason = 'No se encontró micrófono en tu dispositivo iOS.';
+            } else if (error?.message?.includes('Timeout')) {
+                this.unsupportedReason = 'Timeout solicitando permisos. Intenta nuevamente y permite el acceso rápidamente.';
+            } else {
+                this.unsupportedReason = 'Error de micrófono en iOS Safari. Verifica permisos en Configuración > Safari.';
+            }
             return false;
         }
     }
@@ -365,6 +450,81 @@ class SpeechManager {
                     resolve();
                 }
             }
+        });
+    }
+
+    async setupIOSSpeechSynthesis() {
+        if (!this.synthesis) {
+            console.log('🔇 Speech synthesis no disponible en iOS');
+            return;
+        }
+
+        return new Promise((resolve) => {
+            console.log('🍎 Configurando TTS para iOS Safari...');
+            
+            // En iOS, necesitamos "activar" la síntesis con una interacción del usuario
+            this.iosTTSReady = false;
+            this.iosTTSActivated = false;
+            
+            const activateIOSTTS = () => {
+                if (this.iosTTSActivated) return;
+                
+                try {
+                    console.log('🍎 Activando TTS en iOS Safari...');
+                    
+                    // Crear una utterance silenciosa para "activar" el TTS
+                    const silentUtterance = new SpeechSynthesisUtterance('');
+                    silentUtterance.volume = 0;
+                    silentUtterance.rate = 10;
+                    silentUtterance.pitch = 0.1;
+                    
+                    silentUtterance.onstart = () => {
+                        console.log('✅ TTS activado en iOS Safari');
+                        this.iosTTSActivated = true;
+                        this.iosTTSReady = true;
+                        
+                        // Si hay una síntesis pendiente, ejecutarla ahora
+                        if (this.pendingSpeech) {
+                            console.log('🗣️ Ejecutando síntesis pendiente:', this.pendingSpeech.substring(0, 50) + '...');
+                            this.speak(this.pendingSpeech);
+                            this.pendingSpeech = null;
+                        }
+                    };
+                    
+                    silentUtterance.onend = () => {
+                        this.iosTTSReady = true;
+                    };
+                    
+                    silentUtterance.onerror = (e) => {
+                        console.warn('⚠️ Error activando TTS en iOS:', e);
+                        this.iosTTSReady = true; // Continuar de todos modos
+                    };
+                    
+                    this.synthesis.speak(silentUtterance);
+                    
+                } catch (error) {
+                    console.warn('⚠️ Error en activación TTS iOS:', error);
+                    this.iosTTSReady = true;
+                }
+            };
+            
+            // Activar TTS en la primera interacción del usuario
+            const userInteractionEvents = ['touchstart', 'touchend', 'click', 'tap'];
+            
+            const onFirstInteraction = () => {
+                activateIOSTTS();
+                // Remover listeners después de la primera interacción
+                userInteractionEvents.forEach(event => {
+                    document.removeEventListener(event, onFirstInteraction, { passive: true });
+                });
+            };
+            
+            userInteractionEvents.forEach(event => {
+                document.addEventListener(event, onFirstInteraction, { passive: true });
+            });
+            
+            console.log('🍎 TTS iOS configurado. Esperando primera interacción del usuario...');
+            resolve();
         });
     }
 
@@ -615,7 +775,15 @@ class SpeechManager {
     }
 
     async speak(text) {
-        if (!this.synthesis || !text) return false;
+        if (!this.synthesis || !text) {
+            console.warn('🔇 Speech synthesis no disponible o texto vacío');
+            return false;
+        }
+
+        // Manejo especial para iOS Safari
+        if (this.isIOSSafari) {
+            return await this.speakIOS(text);
+        }
 
         try {
             this.stopSpeaking();
@@ -631,15 +799,20 @@ class SpeechManager {
                 this.currentUtterance.pitch = CONFIG.SPEECH.VOICE_PITCH;
                 this.currentUtterance.volume = CONFIG.SPEECH.VOICE_VOLUME;
 
-                this.currentUtterance.onstart = () => this.isSpeaking = true;
+                this.currentUtterance.onstart = () => {
+                    this.isSpeaking = true;
+                    console.log('🗣️ Iniciando síntesis de voz:', text.substring(0, 50) + '...');
+                };
                 this.currentUtterance.onend = () => {
                     this.isSpeaking = false;
                     this.currentUtterance = null;
+                    console.log('✅ Síntesis de voz completada');
                     resolve(true);
                 };
-                this.currentUtterance.onerror = () => {
+                this.currentUtterance.onerror = (e) => {
                     this.isSpeaking = false;
                     this.currentUtterance = null;
+                    console.warn('❌ Error en síntesis de voz:', e);
                     resolve(false);
                 };
 
@@ -647,6 +820,86 @@ class SpeechManager {
             });
 
         } catch (error) {
+            console.error('❌ Error en speak():', error);
+            return false;
+        }
+    }
+
+    async speakIOS(text) {
+        console.log('🍎 Iniciando síntesis de voz en iOS Safari:', text.substring(0, 50) + '...');
+        
+        // Si TTS no está activado aún, guardar para después
+        if (!this.iosTTSActivated) {
+            console.log('🗓️ TTS no activado aún, guardando para después de la interacción del usuario');
+            this.pendingSpeech = text;
+            return false;
+        }
+        
+        // Si TTS no está listo, esperar un poco
+        if (!this.iosTTSReady) {
+            console.log('⏳ Esperando que TTS esté listo...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        try {
+            this.stopSpeaking();
+
+            return new Promise((resolve) => {
+                // Limpiar la cola de síntesis en iOS (importante)
+                this.synthesis.cancel();
+                
+                // Pequeña pausa para asegurar que la cola esté limpia
+                setTimeout(() => {
+                    this.currentUtterance = new SpeechSynthesisUtterance(text);
+
+                    // Configuración específica para iOS
+                    if (this.selectedVoice) {
+                        this.currentUtterance.voice = this.selectedVoice;
+                    }
+
+                    // Configuración optimizada para iOS
+                    this.currentUtterance.rate = Math.min(CONFIG.SPEECH.VOICE_RATE, 1.2); // Máximo 1.2 en iOS
+                    this.currentUtterance.pitch = CONFIG.SPEECH.VOICE_PITCH;
+                    this.currentUtterance.volume = CONFIG.SPEECH.VOICE_VOLUME;
+
+                    this.currentUtterance.onstart = () => {
+                        this.isSpeaking = true;
+                        this.iosTTSReady = false;
+                        console.log('🍎🗣️ TTS iniciado en iOS:', text.substring(0, 50) + '...');
+                    };
+                    
+                    this.currentUtterance.onend = () => {
+                        this.isSpeaking = false;
+                        this.currentUtterance = null;
+                        this.iosTTSReady = true;
+                        console.log('🍎✅ TTS completado en iOS');
+                        resolve(true);
+                    };
+                    
+                    this.currentUtterance.onerror = (e) => {
+                        this.isSpeaking = false;
+                        this.currentUtterance = null;
+                        this.iosTTSReady = true;
+                        console.warn('🍎❌ Error TTS en iOS:', e?.error || e);
+                        resolve(false);
+                    };
+
+                    // Intentar hablar
+                    try {
+                        this.synthesis.speak(this.currentUtterance);
+                    } catch (speakError) {
+                        console.error('🍎❌ Error al ejecutar speak() en iOS:', speakError);
+                        this.isSpeaking = false;
+                        this.currentUtterance = null;
+                        this.iosTTSReady = true;
+                        resolve(false);
+                    }
+                }, 100); // Pausa de 100ms
+            });
+
+        } catch (error) {
+            console.error('🍎❌ Error en speakIOS():', error);
+            this.iosTTSReady = true;
             return false;
         }
     }
@@ -656,6 +909,11 @@ class SpeechManager {
             this.synthesis.cancel();
             this.isSpeaking = false;
             this.currentUtterance = null;
+            
+            // Restablecer estado para iOS
+            if (this.isIOSSafari) {
+                this.iosTTSReady = true;
+            }
         }
     }
 
