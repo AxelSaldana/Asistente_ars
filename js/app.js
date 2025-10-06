@@ -1908,42 +1908,46 @@ class VirtualAssistantApp {
         }
     }
 
+/**
+ * Solicitar permisos - MODIFICADO para iOS
+ */
     async requestPermissions() {
         try {
-            this.updatePermissionStatus('🔄 Inicializando...');
+            this.updatePermissionStatus('Inicializando...');
 
             // 1. Cámara
-            this.updatePermissionStatus('📷 Inicializando cámara...');
+            this.updatePermissionStatus('Inicializando cámara...');
             this.cameraManager = new CameraManager();
             const cameraSuccess = await this.cameraManager.init();
-
             if (!cameraSuccess) {
                 throw new Error('No se pudo acceder a la cámara');
             }
 
-            // 2. Gemini 2.0
-            this.updatePermissionStatus('🤖 Conectando Gemini 2.0...');
-            const aiSuccess = await this.gemini.init();
+            // 2. Speech ANTES de Gemini para iOS user gesture
+            this.updatePermissionStatus('Activando voz para iOS...');
+            console.log('🎤 Iniciando configuración de voz...');
+            const speechOk = await this.speech.init();
+            console.log('🎤 Speech init resultado:', speechOk);
+            
+            if (!speechOk) {
+                const reason = this.speech?.unsupportedReason ? this.speech.unsupportedReason : 'Voz no disponible';
+                console.log('⚠️ Speech falló:', reason);
+                this.updatePermissionStatus(reason);
+                // No lanzar error - continuar sin voz
+                console.log('⚠️ Continuando sin reconocimiento de voz');
+            } else {
+                console.log('✅ Speech configurado correctamente');
+            }
 
+            // 3. Gemini 2.0
+            this.updatePermissionStatus('Conectando Gemini 2.0...');
+            const aiSuccess = await this.gemini.init();
             if (!aiSuccess) {
                 throw new Error('No se pudo conectar con Gemini 2.0');
             }
 
-            // 3. Speech
-            this.updatePermissionStatus('🎤 Configurando voz...');
-            console.log('📋 Iniciando configuración de voz...');
-            const speechOk = await this.speech.init();
-            console.log('📋 Speech init resultado:', speechOk);
-            if (!speechOk) {
-                const reason = (this.speech && this.speech.unsupportedReason) ? this.speech.unsupportedReason : 'Voz no disponible';
-                console.log('📋 Speech falló:', reason);
-                this.updatePermissionStatus(`❌ ${reason}`);
-                throw new Error(reason);
-            }
-            console.log('📋 ✅ Speech configurado correctamente');
-
             // 4. Modelo 3D (reutilizar si ya está cargado para preview)
-            this.updatePermissionStatus('🎭 Preparando modelo 3D...');
+            this.updatePermissionStatus('Preparando modelo 3D...');
             if (!this.model3dManager) {
                 this.model3dManager = new Model3DManager(this.ui.model3dCanvas);
                 await this.model3dManager.init();
@@ -1953,21 +1957,23 @@ class VirtualAssistantApp {
             this.isInitialized = true;
             this.hidePermissionModal();
             this.hideLoadingScreen();
+
             // Dejar al usuario en Preview por defecto tras permisos
             this.enterPreviewMode();
 
-            console.log('Sistema inicializado correctamente');
+            console.log('✅ Sistema inicializado correctamente');
 
         } catch (error) {
             console.error('❌ ERROR CRÍTICO:', error);
-            this.updatePermissionStatus(`❌ ${error.message}`);
+            this.updatePermissionStatus(error.message);
 
             const btn = document.getElementById('requestPermissions');
             if (btn) {
-                btn.textContent = '🔄 Reintentar';
+                btn.textContent = 'Reintentar';
             }
         }
     }
+
 
     // ===== MODOS DE OPERACIÓN =====
 

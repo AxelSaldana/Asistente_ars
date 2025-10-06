@@ -36,15 +36,18 @@
         </div>
     </div>
 
-    <!-- Modal de Permisos (IGUAL QUE PROYECTO FUNCIONANDO) -->
+    <!-- Modal de Permisos (MEJORADO PARA iOS) -->
     <div id="permissionModal" class="permission-modal">
         <div class="modal-content">
             <h3>🤖 Asistente Virtual AR</h3>
-            <p>Para la experiencia completa necesitamos acceso a tu cámara</p>
+            <p>Para la experiencia completa necesitamos acceso a tu cámara y micrófono</p>
             <div class="permissions-list">
                 <div class="permission-item">📷 Cámara (Realidad Aumentada)</div>
                 <div class="permission-item">🎤 Micrófono (Comandos de voz)</div>
                 <div class="permission-item">🤖 IA Gemini (Chat inteligente)</div>
+            </div>
+            <div class="ios-notice" style="margin-top: 15px; padding: 12px; background: rgba(255,193,7,0.15); border: 1px solid rgba(255,193,7,0.3); border-radius: 8px; font-size: 13px; color: #FFC107;">
+                📱 <strong>iOS/Safari:</strong> Presiona "Permitir" cuando aparezcan los avisos de permisos para activar todas las funciones.
             </div>
             <div class="compatibility-notice" style="margin-top: 10px; padding: 8px; background: rgba(76,175,80,0.1); border-radius: 6px; font-size: 12px; color: #4CAF50;">
                 ✨ <strong>Experiencia optimizada</strong> para todos los dispositivos móviles y navegadores modernos.
@@ -52,6 +55,7 @@
             <button id="requestPermissions" class="permission-btn">Activar Asistente AR</button>
         </div>
     </div>
+
 
     <!-- Controles Principales (modo preview) -->
     <div class="ui-overlay main-controls" id="mainControls">

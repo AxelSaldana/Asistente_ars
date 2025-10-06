@@ -26,10 +26,10 @@ export const CONFIG = {
     // Configuración de Speech
     SPEECH: {
         LANGUAGE: 'es-ES',
-        VOICE_RATE: 1.0,
-        VOICE_PITCH: 1.0,
+        VOICE_RATE: 0.85,
+        VOICE_PITCH: 0.8,
         VOICE_VOLUME: 1.0,
-        RECOGNITION_TIMEOUT: 5000
+        RECOGNITION_TIMEOUT: 8000
     },
 
     // Mensajes del sistema

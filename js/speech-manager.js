@@ -1,6 +1,8 @@
 /**
  * Speech Manager - Gestión de reconocimiento y síntesis de voz
+ * Optimizado para iOS Safari
  */
+
 import { CONFIG, DEBUG_CONFIG } from './config.js';
 
 export class SpeechManager {
@@ -13,27 +15,169 @@ export class SpeechManager {
         this.voices = [];
         this.selectedVoice = null;
         this.isInitialized = false;
+        this.unsupportedReason = '';
+        this.lastError = '';
+
+        // Detección de iOS/Safari
+        this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        this.isSafari = /^(?!.*chrome).*safari/i.test(navigator.userAgent);
+        this.isIOSSafari = this.isIOS || this.isSafari;
+
+        // iOS audio context para desbloquear
+        this.audioContext = null;
+        this.audioUnlocked = false;
+
+        // Fallback para iOS
+        this.mediaRecorder = null;
+        this.audioChunks = [];
+        this.stream = null;
     }
 
     /**
      * Inicializar Speech Manager
+     * NUEVO: Activación de audio desde user gesture
      */
     async init() {
         try {
-            this.log('🎤 Inicializando Speech Manager...');
+            console.log('🎤 Inicializando Speech Manager...');
+            console.log('Dispositivo detectado:', {
+                isIOS: this.isIOS,
+                isSafari: this.isSafari,
+                isIOSSafari: this.isIOSSafari,
+                userAgent: navigator.userAgent
+            });
 
-            // Inicializar reconocimiento de voz
-            this.setupSpeechRecognition();
+            // CRÍTICO: Desbloquear audio en iOS desde el user gesture
+            if (this.isIOSSafari) {
+                console.log('🔓 Desbloqueando audio para iOS...');
+                await this.unlockAudioForIOS();
+            }
+
+            // Verificar soporte de Speech Recognition
+            const hasSpeechRecognition = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
             
-            // Inicializar síntesis de voz
-            await this.setupSpeechSynthesis();
+            if (!hasSpeechRecognition) {
+                if (this.isIOSSafari) {
+                    console.warn('Safari en iOS: usando fallback con MediaRecorder');
+                    return await this.initIOSFallback();
+                } else {
+                    this.unsupportedReason = 'Este navegador no soporta reconocimiento de voz. Usa Chrome/Edge en escritorio.';
+                    return false;
+                }
+            }
+
+            // Solicitar permiso de micrófono explícito
+            try {
+                console.log('🎤 Solicitando permisos de micrófono...');
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.log('✅ Permisos de micrófono concedidos');
+                stream.getTracks().forEach(track => track.stop());
+            } catch (e) {
+                console.warn('⚠️ Error al solicitar permisos:', e?.name, e);
+                if (this.isIOSSafari) {
+                    this.unsupportedReason = 'En iOS Safari, permite el acceso al micrófono cuando se solicite.';
+                } else {
+                    this.unsupportedReason = 'Acceso al micrófono denegado. Permite el acceso en la configuración del navegador.';
+                }
+                return false;
+            }
+
+            console.log('🎤 Configurando Speech Recognition...');
+            this.setupSpeechRecognition();
+
+            console.log('🔊 Configurando Speech Synthesis...');
+            try {
+                await this.setupSpeechSynthesis();
+                console.log('✅ Speech Synthesis configurado');
+            } catch (synthError) {
+                console.warn('⚠️ Error en Speech Synthesis, continuando sin TTS:', synthError);
+                // Continuar sin síntesis de voz
+            }
 
             this.isInitialized = true;
-            this.log('✅ Speech Manager inicializado');
+            console.log('✅ Speech Manager inicializado correctamente');
             return true;
 
         } catch (error) {
-            this.logError('❌ Error inicializando Speech Manager:', error);
+            console.error('❌ Error inicializando Speech Manager:', error);
+            this.unsupportedReason = `No se pudo inicializar la voz: ${error?.message || 'desconocido'}`;
+            return false;
+        }
+    }
+
+    /**
+     * NUEVO: Desbloquear audio en iOS Safari
+     * Debe ejecutarse en respuesta a user gesture
+     */
+    async unlockAudioForIOS() {
+        if (!this.isIOSSafari || this.audioUnlocked) return true;
+
+        try {
+            // Crear audio context y reproducir silencio
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            if (this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
+            }
+
+            const buffer = this.audioContext.createBuffer(1, 1, 22050);
+            const source = this.audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(this.audioContext.destination);
+            source.start(0);
+
+            this.audioUnlocked = true;
+            console.log('🔓 Audio desbloqueado para iOS');
+            return true;
+        } catch (error) {
+            console.warn('⚠️ No se pudo desbloquear audio en iOS:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Configurar fallback para iOS Safari
+     */
+    async initIOSFallback() {
+        try {
+            console.log('📱 Configurando fallback para iOS Safari...');
+            
+            // Verificar MediaRecorder support
+            if (!('MediaRecorder' in window)) {
+                this.unsupportedReason = 'Tu dispositivo iOS no soporta grabación de audio web.';
+                return false;
+            }
+
+            // Solicitar permisos específicos para iOS
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    sampleRate: 16000,
+                    channelCount: 1
+                }
+            });
+            this.stream = stream;
+            console.log('✅ Permisos de audio concedidos en iOS');
+
+            // Configurar MediaRecorder
+            this.mediaRecorder = new MediaRecorder(stream);
+            this.mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    this.audioChunks.push(event.data);
+                }
+            };
+
+            await this.setupSpeechSynthesis();
+
+            this.isInitialized = true;
+            console.log('✅ Fallback iOS configurado correctamente');
+            return true;
+
+        } catch (error) {
+            console.error('❌ Error configurando fallback iOS:', error);
+            this.unsupportedReason = 'No se pudo acceder al micrófono en iOS. Asegúrate de permitir el acceso cuando se solicite.';
             return false;
         }
     }
@@ -42,35 +186,40 @@ export class SpeechManager {
      * Configurar reconocimiento de voz
      */
     setupSpeechRecognition() {
-        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-            throw new Error('Reconocimiento de voz no disponible en este navegador');
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) return;
+
+        this.recognition = new SpeechRecognition();
+        
+        // iOS-specific optimizations
+        if (this.isIOSSafari) {
+            this.recognition.continuous = false;      // iOS funciona mejor con continuous=false
+            this.recognition.interimResults = false;  // Reduce procesamiento en iOS
+            this.recognition.maxAlternatives = 1;     // Una sola alternativa para iOS
+        } else {
+            this.recognition.continuous = false;
+            this.recognition.interimResults = false;
+            this.recognition.maxAlternatives = 1;
         }
 
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        this.recognition = new SpeechRecognition();
-
-        this.recognition.continuous = false;
-        this.recognition.interimResults = false;
         this.recognition.lang = CONFIG.SPEECH.LANGUAGE;
-        this.recognition.maxAlternatives = 1;
 
         // Event listeners
         this.recognition.onstart = () => {
             this.isListening = true;
-            this.log('👂 Reconocimiento de voz iniciado');
+            console.log('👂 Reconocimiento iniciado');
         };
 
         this.recognition.onend = () => {
             this.isListening = false;
-            this.log('🛑 Reconocimiento de voz terminado');
+            console.log('🔇 Reconocimiento terminado');
         };
 
-        this.recognition.onerror = (event) => {
+        this.recognition.onerror = (e) => {
             this.isListening = false;
-            this.logError('❌ Error en reconocimiento:', event.error);
+            this.lastError = e?.error ? e.error : 'unknown-error';
+            console.warn('❌ SpeechRecognition error:', this.lastError);
         };
-
-        this.log('👂 Reconocimiento de voz configurado');
     }
 
     /**
@@ -78,138 +227,312 @@ export class SpeechManager {
      */
     async setupSpeechSynthesis() {
         if (!this.synthesis) {
-            throw new Error('Síntesis de voz no disponible');
+            console.log('❌ Speech synthesis no disponible');
+            return;
         }
 
-        // Esperar a que las voces estén disponibles
-        await this.loadVoices();
-        
-        // Seleccionar voz española
-        this.selectSpanishVoice();
-
-        this.log('🔊 Síntesis de voz configurada');
-    }
-
-    /**
-     * Cargar voces disponibles
-     */
-    async loadVoices() {
         return new Promise((resolve) => {
-            const getVoices = () => {
+            let resolved = false;
+
+            const loadVoices = () => {
+                if (resolved) return;
+                resolved = true;
+                
                 this.voices = this.synthesis.getVoices();
-                if (this.voices.length > 0) {
-                    this.log(`🎭 ${this.voices.length} voces disponibles`);
-                    resolve();
+                console.log('🎭 Voces disponibles:', this.voices.length);
+
+                const spanishVoice = this.voices.find(voice => 
+                    voice.lang.startsWith('es') || voice.lang.includes('ES')
+                );
+
+                if (spanishVoice) {
+                    this.selectedVoice = spanishVoice;
+                    console.log('🇪🇸 Voz en español seleccionada:', spanishVoice.name);
                 } else {
-                    // Intentar de nuevo en caso de que las voces no estén listas
-                    setTimeout(getVoices, 100);
+                    console.log('⚠️ Usando voz por defecto');
                 }
+                resolve();
             };
 
-            if (this.voices.length === 0) {
-                this.synthesis.onvoiceschanged = getVoices;
-                getVoices();
-            } else {
-                resolve();
+            // Timeout para evitar que se cuelgue
+            const timeout = setTimeout(() => {
+                if (!resolved) {
+                    console.log('⏰ Timeout en carga de voces, continuando...');
+                    resolved = true;
+                    resolve();
+                }
+            }, 2000);
+
+            // Intentar cargar voces
+            try {
+                this.voices = this.synthesis.getVoices();
+                if (this.voices.length > 0) {
+                    clearTimeout(timeout);
+                    loadVoices();
+                } else {
+                    this.synthesis.onvoiceschanged = () => {
+                        clearTimeout(timeout);
+                        loadVoices();
+                    };
+                }
+            } catch (error) {
+                console.warn('⚠️ Error configurando síntesis:', error);
+                clearTimeout(timeout);
+                if (!resolved) {
+                    resolved = true;
+                    resolve();
+                }
             }
         });
-    }
-
-    /**
-     * Seleccionar voz española
-     */
-    selectSpanishVoice() {
-        // Buscar voz en español
-        const spanishVoices = this.voices.filter(voice => 
-            voice.lang.startsWith('es') || voice.lang.includes('ES')
-        );
-
-        if (spanishVoices.length > 0) {
-            // Preferir voces femeninas o con mejor calidad
-            this.selectedVoice = spanishVoices.find(voice => 
-                voice.name.toLowerCase().includes('female') ||
-                voice.name.toLowerCase().includes('mujer') ||
-                voice.name.toLowerCase().includes('maria') ||
-                voice.name.toLowerCase().includes('carmen')
-            ) || spanishVoices[0];
-
-            this.log('🎭 Voz seleccionada:', this.selectedVoice.name);
-        } else {
-            // Usar voz por defecto
-            this.selectedVoice = this.voices[0] || null;
-            this.log('⚠️ No se encontró voz en español, usando por defecto');
-        }
     }
 
     /**
      * Escuchar comando de voz
      */
     async listen() {
-        if (!this.isInitialized || !this.recognition) {
-            throw new Error('Reconocimiento de voz no inicializado');
+        if (this.isListening) return null;
+
+        // Si estamos en iOS Safari, usar el fallback
+        if (this.isIOSSafari && this.mediaRecorder) {
+            return await this.listenIOSFallback();
         }
 
-        if (this.isListening) {
-            this.log('⚠️ Ya está escuchando');
-            return null;
-        }
-
-        return new Promise((resolve, reject) => {
+        // Usar Web Speech API en navegadores compatibles
+        return new Promise((resolve) => {
             // Detener cualquier síntesis en curso
             this.stopSpeaking();
 
-            let resolved = false;
+            // Crear una nueva instancia para cada intento (algunos navegadores fallan en reusar)
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                console.warn('❌ Web Speech API no disponible');
+                return resolve(null);
+            }
 
-            // Timeout de seguridad
-            const timeout = setTimeout(() => {
-                if (!resolved) {
-                    resolved = true;
-                    this.recognition.stop();
-                    reject(new Error('Timeout esperando comando de voz'));
+            const rec = new SpeechRecognition();
+            this.recognition = rec;
+
+            rec.continuous = false;
+            rec.interimResults = false;
+            rec.lang = CONFIG.SPEECH.LANGUAGE;
+            rec.maxAlternatives = 1;
+
+            this.isListening = true;
+            let settled = false;
+
+            const finish = (val) => {
+                if (settled) return;
+                settled = true;
+                try {
+                    rec.stop();
+                } catch (e) {}
+                this.isListening = false;
+                resolve(val);
+            };
+
+            const timeoutMs = Math.max(5000, CONFIG.SPEECH.RECOGNITION_TIMEOUT || 8000, 12000);
+            const timer = setTimeout(() => {
+                console.warn('⏰ Timeout de reconocimiento');
+                finish(null);
+            }, timeoutMs);
+
+            rec.onresult = (event) => {
+                clearTimeout(timer);
+                let text = null;
+                try {
+                    if (event.results && event.results.length > 0) {
+                        text = event.results[0]?.[0]?.transcript?.trim();
+                        console.log('👂 Texto reconocido:', text);
+                    }
+                } catch (e) {}
+                finish(text && text.length > 0 ? text : null);
+            };
+
+            rec.onerror = (e) => {
+                clearTimeout(timer);
+                console.warn('❌ recognition.onerror:', e?.error, e);
+                finish(null);
+            };
+
+            rec.onend = () => {
+                clearTimeout(timer);
+                if (!settled) {
+                    console.log('🔇 Reconocimiento terminado sin resultado');
+                    finish(null);
                 }
-            }, CONFIG.SPEECH.RECOGNITION_TIMEOUT);
+            };
 
-            this.recognition.onresult = (event) => {
-                if (resolved) return;
-                resolved = true;
-                
+            try {
+                console.log('🎤 Iniciando reconocimiento de voz...');
+                rec.start();
+            } catch (err) {
+                console.warn('❌ Error al iniciar reconocimiento:', err?.message, err);
+                clearTimeout(timer);
+                finish(null);
+            }
+        });
+    }
+
+    /**
+     * Fallback de escucha para iOS
+     */
+    async listenIOSFallback() {
+        console.log('📱 Usando transcripción web para iOS...');
+        
+        if (!this.mediaRecorder || !this.stream) {
+            console.error('❌ MediaRecorder no configurado');
+            return null;
+        }
+
+        return new Promise((resolve) => {
+            this.audioChunks = [];
+            this.isListening = true;
+
+            const timeout = setTimeout(() => {
+                if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+                    this.mediaRecorder.stop();
+                }
+            }, 4000); // 4 segundos de grabación
+
+            this.mediaRecorder.onstop = async () => {
                 clearTimeout(timeout);
-                
-                if (event.results.length > 0) {
-                    const transcript = event.results[0][0].transcript;
-                    this.log('👂 Texto reconocido:', transcript);
-                    resolve(transcript.trim());
+                this.isListening = false;
+
+                if (this.audioChunks.length > 0) {
+                    try {
+                        // Crear blob de audio
+                        const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+                        console.log('🎵 Audio capturado:', audioBlob.size, 'bytes');
+
+                        // Intentar transcripción con Web Speech API si está disponible
+                        const transcript = await this.transcribeAudioBlob(audioBlob);
+                        if (transcript) {
+                            resolve(transcript);
+                        } else {
+                            // Fallback: mostrar interfaz de entrada manual
+                            resolve(await this.showManualInputFallback());
+                        }
+                    } catch (error) {
+                        console.error('❌ Error procesando audio:', error);
+                        resolve(await this.showManualInputFallback());
+                    }
                 } else {
                     resolve(null);
                 }
             };
 
-            this.recognition.onerror = (event) => {
-                if (resolved) return;
-                resolved = true;
-                
+            this.mediaRecorder.onerror = (e) => {
                 clearTimeout(timeout);
-                this.logError('❌ Error en reconocimiento:', event.error);
-                reject(new Error(`Error de reconocimiento: ${event.error}`));
-            };
-
-            this.recognition.onend = () => {
-                if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    resolve(null);
-                }
+                this.isListening = false;
+                console.error('❌ Error en MediaRecorder:', e);
+                resolve(null);
             };
 
             try {
-                this.recognition.start();
-            } catch (error) {
-                if (!resolved) {
-                    resolved = true;
-                    clearTimeout(timeout);
-                    reject(error);
-                }
+                this.mediaRecorder.start(100); // Capturar en chunks de 100ms
+                console.log('🎤 Grabación iniciada en iOS Safari');
+            } catch (err) {
+                clearTimeout(timeout);
+                this.isListening = false;
+                console.error('❌ Error iniciando grabación:', err);
+                resolve(null);
             }
+        });
+    }
+
+    /**
+     * Intentar transcripción de audio blob (experimental)
+     */
+    async transcribeAudioBlob(audioBlob) {
+        // Intentar usar Web Speech API con el audio grabado (experimental)
+        try {
+            // Convertir blob a URL para reproducción
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            
+            // Esta es una aproximación - Web Speech API no acepta blobs directamente
+            // pero podemos simular el comportamiento
+            console.log('🔄 Intentando transcripción experimental...');
+            
+            // Por ahora retornamos null para usar el fallback manual
+            URL.revokeObjectURL(audioUrl);
+            return null;
+        } catch (error) {
+            console.warn('⚠️ Transcripción experimental falló:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Mostrar modal de entrada manual como fallback
+     */
+    async showManualInputFallback() {
+        return new Promise((resolve) => {
+            // Crear modal temporal para entrada manual
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.8);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 10000;
+            `;
+
+            const content = document.createElement('div');
+            content.style.cssText = `
+                background: #2a2a2a;
+                padding: 20px;
+                border-radius: 10px;
+                max-width: 90%;
+                width: 400px;
+                text-align: center;
+            `;
+
+            content.innerHTML = `
+                <h3 style="color: #fff; margin-bottom: 15px;">🎤 Comando de Voz</h3>
+                <p style="color: #ccc; margin-bottom: 15px;">Audio grabado. Escribe lo que dijiste:</p>
+                <input type="text" id="voiceInput" placeholder="Escribe tu comando aquí..." style="width: 100%; padding: 10px; border: none; border-radius: 5px; margin-bottom: 15px; font-size: 16px;">
+                <div>
+                    <button id="voiceOk" style="background: #4CAF50; color: white; border: none; padding: 10px 20px; border-radius: 5px; margin-right: 10px; cursor: pointer;">Enviar</button>
+                    <button id="voiceCancel" style="background: #f44336; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer;">Cancelar</button>
+                </div>
+            `;
+
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+
+            const input = content.querySelector('#voiceInput');
+            const okBtn = content.querySelector('#voiceOk');
+            const cancelBtn = content.querySelector('#voiceCancel');
+
+            // Enfocar input
+            setTimeout(() => input.focus(), 100);
+
+            const cleanup = () => {
+                document.body.removeChild(modal);
+            };
+
+            okBtn.onclick = () => {
+                const text = input.value.trim();
+                cleanup();
+                resolve(text || null);
+            };
+
+            cancelBtn.onclick = () => {
+                cleanup();
+                resolve(null);
+            };
+
+            input.onkeypress = (e) => {
+                if (e.key === 'Enter') {
+                    okBtn.click();
+                }
+            };
         });
     }
 
@@ -217,61 +540,46 @@ export class SpeechManager {
      * Hablar texto
      */
     async speak(text) {
-        if (!this.isInitialized || !this.synthesis) {
-            this.logError('❌ Síntesis de voz no disponible');
-            return false;
-        }
-
-        if (!text || text.trim().length === 0) {
-            this.log('⚠️ No hay texto para hablar');
-            return false;
-        }
+        if (!this.synthesis || !text) return false;
 
         try {
-            // Detener síntesis anterior
             this.stopSpeaking();
 
-            this.log('🔊 Hablando:', text);
+            // iOS-specific preparations
+            if (this.isIOSSafari && !this.audioUnlocked) {
+                await this.unlockAudioForIOS();
+            }
 
             return new Promise((resolve) => {
                 this.currentUtterance = new SpeechSynthesisUtterance(text);
-                
-                // Configurar voz
+
                 if (this.selectedVoice) {
                     this.currentUtterance.voice = this.selectedVoice;
                 }
 
-                // Configurar parámetros
                 this.currentUtterance.rate = CONFIG.SPEECH.VOICE_RATE;
                 this.currentUtterance.pitch = CONFIG.SPEECH.VOICE_PITCH;
                 this.currentUtterance.volume = CONFIG.SPEECH.VOICE_VOLUME;
 
-                // Event listeners
                 this.currentUtterance.onstart = () => {
                     this.isSpeaking = true;
-                    this.log('🔊 Síntesis iniciada');
                 };
 
                 this.currentUtterance.onend = () => {
                     this.isSpeaking = false;
                     this.currentUtterance = null;
-                    this.log('🔊 Síntesis terminada');
                     resolve(true);
                 };
 
-                this.currentUtterance.onerror = (event) => {
+                this.currentUtterance.onerror = () => {
                     this.isSpeaking = false;
                     this.currentUtterance = null;
-                    this.logError('❌ Error en síntesis:', event.error);
                     resolve(false);
                 };
 
-                // Iniciar síntesis
                 this.synthesis.speak(this.currentUtterance);
             });
-
         } catch (error) {
-            this.logError('❌ Error hablando:', error);
             return false;
         }
     }
@@ -284,87 +592,7 @@ export class SpeechManager {
             this.synthesis.cancel();
             this.isSpeaking = false;
             this.currentUtterance = null;
-            this.log('🛑 Síntesis detenida');
         }
-    }
-
-    /**
-     * Detener reconocimiento
-     */
-    stopListening() {
-        if (this.recognition && this.isListening) {
-            this.recognition.stop();
-            this.log('🛑 Reconocimiento detenido');
-        }
-    }
-
-    /**
-     * Cambiar voz
-     */
-    setVoice(voiceName) {
-        const voice = this.voices.find(v => 
-            v.name === voiceName || v.name.includes(voiceName)
-        );
-
-        if (voice) {
-            this.selectedVoice = voice;
-            this.log('🎭 Voz cambiada a:', voice.name);
-            return true;
-        }
-
-        this.log('⚠️ Voz no encontrada:', voiceName);
-        return false;
-    }
-
-    /**
-     * Obtener voces disponibles
-     */
-    getAvailableVoices() {
-        return this.voices.map(voice => ({
-            name: voice.name,
-            lang: voice.lang,
-            gender: voice.name.toLowerCase().includes('female') ? 'female' : 'male'
-        }));
-    }
-
-    /**
-     * Verificar soporte
-     */
-    checkSupport() {
-        return {
-            recognition: ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window),
-            synthesis: 'speechSynthesis' in window,
-            voicesAvailable: this.voices.length > 0
-        };
-    }
-
-    /**
-     * Obtener estado
-     */
-    getStatus() {
-        return {
-            isInitialized: this.isInitialized,
-            isListening: this.isListening,
-            isSpeaking: this.isSpeaking,
-            selectedVoice: this.selectedVoice?.name || 'Ninguna',
-            voicesCount: this.voices.length
-        };
-    }
-
-    /**
-     * Logging
-     */
-    log(message, ...args) {
-        if (DEBUG_CONFIG.ENABLED) {
-            console.log(`[SpeechManager] ${message}`, ...args);
-        }
-    }
-
-    /**
-     * Error logging
-     */
-    logError(message, error) {
-        console.error(`[SpeechManager] ${message}`, error);
     }
 
     /**
@@ -372,8 +600,25 @@ export class SpeechManager {
      */
     dispose() {
         this.stopSpeaking();
-        this.stopListening();
+        
+        // Limpiar recursos de iOS
+        if (this.stream) {
+            this.stream.getTracks().forEach(track => track.stop());
+            this.stream = null;
+        }
+        
+        if (this.mediaRecorder) {
+            if (this.mediaRecorder.state === 'recording') {
+                this.mediaRecorder.stop();
+            }
+            this.mediaRecorder = null;
+        }
+
+        if (this.audioContext && this.audioContext.state !== 'closed') {
+            this.audioContext.close();
+            this.audioContext = null;
+        }
+
         this.isInitialized = false;
-        this.log('🗑️ Speech Manager destruido');
     }
 }
