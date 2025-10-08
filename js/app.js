@@ -470,60 +470,155 @@ class SpeechManager {
                 if (this.iosTTSActivated) return;
                 
                 try {
-                    console.log('🍎 Activando TTS en iOS Safari...');
+                    console.log('🍎📱 Activando TTS en iOS Safari (iPhone 14+)...');
+                    console.log('🔍 Estado actual:', {
+                        synthesis: !!this.synthesis,
+                        speaking: this.synthesis?.speaking,
+                        pending: this.synthesis?.pending,
+                        paused: this.synthesis?.paused,
+                        voices: this.synthesis?.getVoices()?.length || 0
+                    });
+                    
+                    // Limpiar cualquier síntesis pendiente
+                    if (this.synthesis.speaking || this.synthesis.pending) {
+                        this.synthesis.cancel();
+                    }
                     
                     // Crear una utterance silenciosa para "activar" el TTS
-                    const silentUtterance = new SpeechSynthesisUtterance('');
-                    silentUtterance.volume = 0;
-                    silentUtterance.rate = 10;
+                    // En iPhone 14+ necesitamos un texto muy corto pero audible
+                    const silentUtterance = new SpeechSynthesisUtterance('.');
+                    silentUtterance.volume = 0.01; // Muy bajo pero no 0
+                    silentUtterance.rate = 10; // Muy rápido
                     silentUtterance.pitch = 0.1;
                     
-                    silentUtterance.onstart = () => {
-                        console.log('✅ TTS activado en iOS Safari');
+                    let activationTimeout = setTimeout(() => {
+                        console.warn('⏰ Timeout activando TTS, marcando como activado de todos modos');
                         this.iosTTSActivated = true;
                         this.iosTTSReady = true;
+                        
+                        // Ocultar indicador de iOS TTS
+                        if (window.app && window.app.hideIOSTTSNotice) {
+                            window.app.hideIOSTTSNotice();
+                        }
+                        
+                        if (this.pendingSpeech) {
+                            console.log('🗣️ Ejecutando síntesis pendiente (timeout):', this.pendingSpeech.substring(0, 50) + '...');
+                            setTimeout(() => this.speak(this.pendingSpeech), 100);
+                            this.pendingSpeech = null;
+                        }
+                    }, 3000);
+                    
+                    silentUtterance.onstart = () => {
+                        clearTimeout(activationTimeout);
+                        console.log('✅🍎 TTS activado exitosamente en iOS Safari');
+                        this.iosTTSActivated = true;
+                        this.iosTTSReady = true;
+                        
+                        // Ocultar indicador de iOS TTS
+                        if (window.app && window.app.hideIOSTTSNotice) {
+                            window.app.hideIOSTTSNotice();
+                        }
                         
                         // Si hay una síntesis pendiente, ejecutarla ahora
                         if (this.pendingSpeech) {
                             console.log('🗣️ Ejecutando síntesis pendiente:', this.pendingSpeech.substring(0, 50) + '...');
-                            this.speak(this.pendingSpeech);
+                            setTimeout(() => this.speak(this.pendingSpeech), 200);
                             this.pendingSpeech = null;
                         }
                     };
                     
                     silentUtterance.onend = () => {
+                        clearTimeout(activationTimeout);
                         this.iosTTSReady = true;
+                        console.log('🍎 TTS activación completada');
                     };
                     
                     silentUtterance.onerror = (e) => {
-                        console.warn('⚠️ Error activando TTS en iOS:', e);
-                        this.iosTTSReady = true; // Continuar de todos modos
+                        clearTimeout(activationTimeout);
+                        console.warn('⚠️ Error activando TTS en iOS:', e?.error || e);
+                        // Marcar como activado de todos modos para intentar funcionar
+                        this.iosTTSActivated = true;
+                        this.iosTTSReady = true;
+                        
+                        // Ocultar indicador de iOS TTS
+                        if (window.app && window.app.hideIOSTTSNotice) {
+                            window.app.hideIOSTTSNotice();
+                        }
+                        
+                        if (this.pendingSpeech) {
+                            console.log('🗣️ Intentando síntesis pendiente a pesar del error...');
+                            setTimeout(() => this.speak(this.pendingSpeech), 300);
+                            this.pendingSpeech = null;
+                        }
                     };
                     
+                    console.log('🍎 Ejecutando utterance de activación...');
                     this.synthesis.speak(silentUtterance);
                     
                 } catch (error) {
                     console.warn('⚠️ Error en activación TTS iOS:', error);
+                    // Marcar como activado de todos modos
+                    this.iosTTSActivated = true;
                     this.iosTTSReady = true;
+                    
+                    // Ocultar indicador de iOS TTS
+                    if (window.app && window.app.hideIOSTTSNotice) {
+                        window.app.hideIOSTTSNotice();
+                    }
+                    
+                    if (this.pendingSpeech) {
+                        console.log('🗣️ Intentando síntesis pendiente tras error de activación...');
+                        setTimeout(() => this.speak(this.pendingSpeech), 500);
+                        this.pendingSpeech = null;
+                    }
                 }
             };
             
             // Activar TTS en la primera interacción del usuario
-            const userInteractionEvents = ['touchstart', 'touchend', 'click', 'tap'];
+            // Más eventos para iPhone 14+ y iOS recientes
+            const userInteractionEvents = [
+                'touchstart', 'touchend', 'touchmove',
+                'click', 'tap', 'pointerdown', 'pointerup',
+                'mousedown', 'mouseup'
+            ];
             
-            const onFirstInteraction = () => {
-                activateIOSTTS();
+            let interactionDetected = false;
+            
+            const onFirstInteraction = (event) => {
+                if (interactionDetected) return;
+                interactionDetected = true;
+                
+                console.log('👆 Primera interacción detectada:', event.type);
+                
+                // Pequeña pausa para asegurar que el evento se complete
+                setTimeout(() => {
+                    activateIOSTTS();
+                }, 50);
+                
                 // Remover listeners después de la primera interacción
-                userInteractionEvents.forEach(event => {
-                    document.removeEventListener(event, onFirstInteraction, { passive: true });
+                userInteractionEvents.forEach(eventType => {
+                    document.removeEventListener(eventType, onFirstInteraction, { passive: true });
                 });
             };
             
-            userInteractionEvents.forEach(event => {
-                document.addEventListener(event, onFirstInteraction, { passive: true });
+            userInteractionEvents.forEach(eventType => {
+                document.addEventListener(eventType, onFirstInteraction, { passive: true });
             });
             
-            console.log('🍎 TTS iOS configurado. Esperando primera interacción del usuario...');
+            // También intentar activar en visibilitychange (cuando la app vuelve al foco)
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && !this.iosTTSActivated) {
+                    console.log('👁️ App visible, intentando activar TTS...');
+                    setTimeout(() => {
+                        if (!this.iosTTSActivated) {
+                            activateIOSTTS();
+                        }
+                    }, 100);
+                }
+            });
+            
+            console.log('🍎📱 TTS iOS configurado para iPhone 14+. Esperando primera interacción del usuario...');
+            console.log('📝 Eventos escuchando:', userInteractionEvents);
             resolve();
         });
     }
@@ -826,79 +921,133 @@ class SpeechManager {
     }
 
     async speakIOS(text) {
-        console.log('🍎 Iniciando síntesis de voz en iOS Safari:', text.substring(0, 50) + '...');
+        console.log('🍎📱 Iniciando síntesis de voz en iOS Safari (iPhone 14+):', text.substring(0, 50) + '...');
+        
+        // Debug del estado actual
+        console.log('🔍 Estado TTS iOS:', {
+            activated: this.iosTTSActivated,
+            ready: this.iosTTSReady,
+            speaking: this.isSpeaking,
+            synthesis: {
+                speaking: this.synthesis?.speaking,
+                pending: this.synthesis?.pending,
+                paused: this.synthesis?.paused
+            }
+        });
         
         // Si TTS no está activado aún, guardar para después
         if (!this.iosTTSActivated) {
             console.log('🗓️ TTS no activado aún, guardando para después de la interacción del usuario');
+            console.log('📝 Instrucción: Toca cualquier parte de la pantalla para activar la voz');
             this.pendingSpeech = text;
             return false;
         }
         
-        // Si TTS no está listo, esperar un poco
+        // Si TTS no está listo, esperar un poco más
         if (!this.iosTTSReady) {
             console.log('⏳ Esperando que TTS esté listo...');
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 800));
         }
 
         try {
             this.stopSpeaking();
 
             return new Promise((resolve) => {
-                // Limpiar la cola de síntesis en iOS (importante)
-                this.synthesis.cancel();
+                // Limpiar la cola de síntesis en iOS (crítico)
+                if (this.synthesis.speaking || this.synthesis.pending) {
+                    console.log('🧹 Limpiando cola de síntesis...');
+                    this.synthesis.cancel();
+                }
                 
-                // Pequeña pausa para asegurar que la cola esté limpia
+                // Pausa más larga para iPhone 14+
                 setTimeout(() => {
+                    console.log('🍎 Creando utterance para iPhone 14+...');
                     this.currentUtterance = new SpeechSynthesisUtterance(text);
 
                     // Configuración específica para iOS
                     if (this.selectedVoice) {
                         this.currentUtterance.voice = this.selectedVoice;
+                        console.log('🎤 Voz seleccionada:', this.selectedVoice.name);
+                    } else {
+                        console.log('🎤 Usando voz por defecto');
                     }
 
-                    // Configuración optimizada para iOS
-                    this.currentUtterance.rate = Math.min(CONFIG.SPEECH.VOICE_RATE, 1.2); // Máximo 1.2 en iOS
+                    // Configuración optimizada para iPhone 14+
+                    this.currentUtterance.rate = Math.min(CONFIG.SPEECH.VOICE_RATE, 1.0); // Más conservador
                     this.currentUtterance.pitch = CONFIG.SPEECH.VOICE_PITCH;
-                    this.currentUtterance.volume = CONFIG.SPEECH.VOICE_VOLUME;
+                    this.currentUtterance.volume = Math.max(CONFIG.SPEECH.VOICE_VOLUME, 0.8); // Asegurar volumen audible
+                    
+                    console.log('🔊 Configuración TTS:', {
+                        rate: this.currentUtterance.rate,
+                        pitch: this.currentUtterance.pitch,
+                        volume: this.currentUtterance.volume,
+                        voice: this.currentUtterance.voice?.name || 'default'
+                    });
+
+                    let hasStarted = false;
+                    let hasEnded = false;
+                    
+                    // Timeout de seguridad
+                    const safetyTimeout = setTimeout(() => {
+                        if (!hasStarted && !hasEnded) {
+                            console.warn('⏰ Timeout de seguridad - TTS no inició');
+                            this.isSpeaking = false;
+                            this.currentUtterance = null;
+                            this.iosTTSReady = true;
+                            resolve(false);
+                        }
+                    }, 5000);
 
                     this.currentUtterance.onstart = () => {
+                        hasStarted = true;
+                        clearTimeout(safetyTimeout);
                         this.isSpeaking = true;
                         this.iosTTSReady = false;
-                        console.log('🍎🗣️ TTS iniciado en iOS:', text.substring(0, 50) + '...');
+                        console.log('🍎🗣️ TTS iniciado exitosamente en iPhone 14+:', text.substring(0, 50) + '...');
                     };
                     
                     this.currentUtterance.onend = () => {
+                        hasEnded = true;
+                        clearTimeout(safetyTimeout);
                         this.isSpeaking = false;
                         this.currentUtterance = null;
                         this.iosTTSReady = true;
-                        console.log('🍎✅ TTS completado en iOS');
+                        console.log('🍎✅ TTS completado exitosamente en iPhone 14+');
                         resolve(true);
                     };
                     
                     this.currentUtterance.onerror = (e) => {
+                        hasEnded = true;
+                        clearTimeout(safetyTimeout);
                         this.isSpeaking = false;
                         this.currentUtterance = null;
                         this.iosTTSReady = true;
-                        console.warn('🍎❌ Error TTS en iOS:', e?.error || e);
+                        console.error('🍎❌ Error TTS en iPhone 14+:', {
+                            error: e?.error || e,
+                            message: e?.message,
+                            type: e?.type
+                        });
                         resolve(false);
                     };
 
-                    // Intentar hablar
+                    // Intentar hablar con manejo de errores mejorado
                     try {
+                        console.log('🍎 Ejecutando synthesis.speak()...');
                         this.synthesis.speak(this.currentUtterance);
+                        console.log('🍎 synthesis.speak() ejecutado, esperando eventos...');
                     } catch (speakError) {
-                        console.error('🍎❌ Error al ejecutar speak() en iOS:', speakError);
+                        clearTimeout(safetyTimeout);
+                        console.error('🍎❌ Error al ejecutar speak() en iPhone 14+:', speakError);
                         this.isSpeaking = false;
                         this.currentUtterance = null;
                         this.iosTTSReady = true;
                         resolve(false);
                     }
-                }, 100); // Pausa de 100ms
+                }, 200); // Pausa más larga para iPhone 14+
             });
 
         } catch (error) {
-            console.error('🍎❌ Error en speakIOS():', error);
+            console.error('🍎❌ Error en speakIOS() para iPhone 14+:', error);
             this.iosTTSReady = true;
             return false;
         }
@@ -2115,7 +2264,10 @@ class VirtualAssistantApp {
             arStatus: document.getElementById('arStatus'),
 
             camera: document.getElementById('camera'),
-            model3dCanvas: document.getElementById('model3dCanvas')
+            model3dCanvas: document.getElementById('model3dCanvas'),
+            
+            // iOS TTS Notice
+            iosTTSNotice: document.getElementById('iosTTSNotice')
         };
     }
 
@@ -2688,7 +2840,12 @@ class VirtualAssistantApp {
             }
 
             if (this.speech) {
-                this.speech.speak(response);
+                const speechResult = this.speech.speak(response);
+                
+                // Si es iOS Safari y no se pudo hablar (TTS no activado), mostrar indicador
+                if (this.speech.isIOSSafari && !speechResult) {
+                    this.checkAndShowIOSTTSNotice();
+                }
             }
 
             if ((this.isInPreview || this.isInAR) && this.model3dManager) {
@@ -2713,7 +2870,12 @@ class VirtualAssistantApp {
             }
 
             if (this.speech) {
-                this.speech.speak(`${fallback} ${suggestions}`);
+                const speechResult = this.speech.speak(`${fallback} ${suggestions}`);
+                
+                // Si es iOS Safari y no se pudo hablar (TTS no activado), mostrar indicador
+                if (this.speech.isIOSSafari && !speechResult) {
+                    this.checkAndShowIOSTTSNotice();
+                }
             }
 
             this.updateChatStatus('');
@@ -2858,6 +3020,33 @@ class VirtualAssistantApp {
             setTimeout(() => {
                 this.ui.loadingScreen.style.display = 'none';
             }, 500);
+        }
+    }
+
+    // ===== iOS TTS INDICATOR MANAGEMENT =====
+    showIOSTTSNotice() {
+        if (!this.speech?.isIOSSafari || this.speech?.iosTTSActivated) return;
+        
+        console.log('🍎📢 Mostrando indicador de activación TTS para iOS');
+        if (this.ui.iosTTSNotice) {
+            this.ui.iosTTSNotice.classList.remove('hidden');
+        }
+    }
+
+    hideIOSTTSNotice() {
+        console.log('🍎✅ Ocultando indicador de activación TTS para iOS');
+        if (this.ui.iosTTSNotice) {
+            this.ui.iosTTSNotice.classList.add('hidden');
+        }
+    }
+
+    checkAndShowIOSTTSNotice() {
+        // Mostrar indicador si es iOS Safari y TTS no está activado
+        if (this.speech?.isIOSSafari && !this.speech?.iosTTSActivated) {
+            // Mostrar después de un pequeño delay para que el usuario vea la respuesta primero
+            setTimeout(() => {
+                this.showIOSTTSNotice();
+            }, 1000);
         }
     }
 

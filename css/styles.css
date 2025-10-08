@@ -558,14 +558,79 @@ button:active {
     display: none !important;
 }
 
-/* ===== SCROLLBARS PERSONALIZADAS ===== */
-.ar-response::-webkit-scrollbar {
-    width: 4px;
+/* ===== iOS TTS ACTIVATION NOTICE ===== */
+.ios-tts-notice {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.9);
+    border-radius: 16px;
+    padding: 20px;
+    max-width: 320px;
+    width: 90%;
+    backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    animation: iosTTSPulse 2s infinite ease-in-out;
 }
 
-.ar-response::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
+.tts-notice-content {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    color: white;
+    text-align: left;
+}
+
+.tts-icon {
+    font-size: 2.5rem;
+    flex-shrink: 0;
+}
+
+.tts-text {
+    flex: 1;
+}
+
+.tts-text strong {
+    display: block;
+    font-size: 1.1rem;
+    margin-bottom: 5px;
+    color: #FFC107;
+}
+
+.tts-text p {
+    font-size: 0.9rem;
+    line-height: 1.3;
+    opacity: 0.9;
+}
+
+.tts-animation {
+    font-size: 2rem;
+    animation: iosTTSTap 1.5s infinite ease-in-out;
+    flex-shrink: 0;
+}
+
+@keyframes iosTTSPulse {
+    0%, 100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.9;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.05);
+        opacity: 1;
+    }
+}
+
+@keyframes iosTTSTap {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 0.7;
+    }
+    50% {
+        transform: scale(1.2);
+        opacity: 1;
+    }
 }
 
 .ar-response::-webkit-scrollbar-thumb {
@@ -642,6 +707,32 @@ button:active {
         left: 10px;
         right: 10px;
         bottom: 10px;
+    }
+    
+    /* Responsive para iOS TTS Notice en pantallas pequeñas */
+    .ios-tts-notice {
+        padding: 16px;
+        max-width: 280px;
+    }
+    
+    .tts-notice-content {
+        gap: 12px;
+    }
+    
+    .tts-icon {
+        font-size: 2rem;
+    }
+    
+    .tts-text strong {
+        font-size: 1rem;
+    }
+    
+    .tts-text p {
+        font-size: 0.85rem;
+    }
+    
+    .tts-animation {
+        font-size: 1.5rem;
     }
 }
 
