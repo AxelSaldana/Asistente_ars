@@ -4,7 +4,6 @@
     padding: 0;
     box-sizing: border-box;
 }
-
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     overflow: hidden;
@@ -12,6 +11,7 @@ body {
     color: #333;
     height: 100vh;
     width: 100vw;
+    
 }
 
 /* ===== ELEMENTOS MEDIA ===== */
@@ -24,6 +24,7 @@ body {
     width: 100vw;
     height: 100vh;
     object-fit: cover;
+    object-position: center;
     z-index: 1;
     display: none; /* Oculto por defecto */
 }
@@ -558,14 +559,113 @@ button:active {
     display: none !important;
 }
 
-/* ===== SCROLLBARS PERSONALIZADAS ===== */
-.ar-response::-webkit-scrollbar {
-    width: 4px;
+/* ===== iOS TTS ACTIVATION NOTICE ===== */
+.ios-tts-notice {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.95);
+    border-radius: 16px;
+    padding: 20px;
+    max-width: 320px;
+    width: 90%;
+    backdrop-filter: blur(15px);
+    border: 2px solid rgba(255, 193, 7, 0.6);
+    box-shadow: 0 0 30px rgba(255, 193, 7, 0.3), 0 0 60px rgba(255, 193, 7, 0.1);
+    animation: iosTTSPulse 2s infinite ease-in-out;
 }
 
-.ar-response::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
+.tts-notice-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    color: white;
+    text-align: center;
+}
+
+.tts-icon {
+    font-size: 2.5rem;
+    flex-shrink: 0;
+}
+
+.tts-text {
+    flex: 1;
+}
+
+.tts-text strong {
+    display: block;
+    font-size: 1.1rem;
+    margin-bottom: 5px;
+    color: #FFC107;
+}
+
+.tts-text p {
+    font-size: 0.9rem;
+    line-height: 1.3;
+    opacity: 0.9;
+    margin-bottom: 5px;
+}
+
+.tts-text small {
+    font-size: 0.75rem;
+    opacity: 0.7;
+    color: #ccc;
+}
+
+.tts-activate-btn {
+    background: linear-gradient(135deg, #4CAF50, #45a049);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 25px;
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+    min-width: 150px;
+}
+
+.tts-activate-btn:hover {
+    background: linear-gradient(135deg, #45a049, #4CAF50);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4);
+}
+
+.tts-activate-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 10px rgba(76, 175, 80, 0.3);
+}
+
+.tts-animation {
+    font-size: 2rem;
+    animation: iosTTSTap 1.5s infinite ease-in-out;
+    flex-shrink: 0;
+}
+
+@keyframes iosTTSPulse {
+    0%, 100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.9;
+    }
+    50% {
+        transform: translate(-50%, -50%) scale(1.05);
+        opacity: 1;
+    }
+}
+
+@keyframes iosTTSTap {
+    0%, 100% {
+        transform: scale(1);
+        opacity: 0.7;
+    }
+    50% {
+        transform: scale(1.2);
+        opacity: 1;
+    }
 }
 
 .ar-response::-webkit-scrollbar-thumb {
@@ -642,6 +742,32 @@ button:active {
         left: 10px;
         right: 10px;
         bottom: 10px;
+    }
+    
+    /* Responsive para iOS TTS Notice en pantallas pequeñas */
+    .ios-tts-notice {
+        padding: 16px;
+        max-width: 280px;
+    }
+    
+    .tts-notice-content {
+        gap: 12px;
+    }
+    
+    .tts-icon {
+        font-size: 2rem;
+    }
+    
+    .tts-text strong {
+        font-size: 1rem;
+    }
+    
+    .tts-text p {
+        font-size: 0.85rem;
+    }
+    
+    .tts-animation {
+        font-size: 1.5rem;
     }
 }
 
